@@ -230,6 +230,11 @@ body.dragging .drop-over{display:flex}
 .astat.pendente{color:var(--muted)}
 .ed-banner{font-size:13px;padding:9px 12px;border-radius:7px;background:var(--accent-soft);border:1px solid var(--accent);color:var(--ink)}
 .ed-banner b{color:var(--accent)}
+.pill.rev{background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn)}
+.rev-banner{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;font-size:13px;padding:9px 12px;border-radius:7px;background:var(--warn-soft);border:1px solid var(--warn);color:var(--ink)}
+.rev-banner>div{flex:1 1 320px;min-width:0}
+.rev-banner b{color:var(--warn)}
+.astat.dep{border-style:dashed}
 .setup{max-width:640px;margin:8vh auto;padding-inline:16px;line-height:1.6}
 .setup code{font-family:var(--mono);background:var(--sunk);padding:1px 5px;border-radius:4px}
 </style>
@@ -828,7 +833,19 @@ function procsList(){ return Object.keys(S.procs).map(function(k){return S.procs
 function destOf(pid){ return Object.keys(S.dest).map(function(k){return S.dest[k];}).filter(function(d){return d.proc===pid;}).sort(function(a,b){return String(a.criadoEm).localeCompare(String(b.criadoEm));}); }
 function comDestaque(p){ return destOf(p.id).length>0; }
 /* análise por gabinete: pendente | sem | destacado */
-function analiseDe(procId,gab){ if(destOf(procId).some(function(d){return d.gab===gab;})) return 'destacado'; return S.anal&&S.anal[procId+'__'+gab]?'sem':'pendente'; }
+function analiseDe(procId,gab){ if(destOf(procId).some(function(d){return d.gab===gab;})) return 'destacado'; var mk=S.anal&&S.anal[procId+'__'+gab]; return mk&&mk.status!=='ciente'?'sem':'pendente'; }
+/* momento da última análise do gabinete: marca "sem destaque", ciência ou destaques */
+function analiseTempo(procId,gab){
+  var t=[], mk=S.anal&&S.anal[procId+'__'+gab]; if(mk&&mk.em) t.push(mk.em);
+  destOf(procId).forEach(function(d){ if(d.gab===gab){ if(d.criadoEm) t.push(d.criadoEm); if(d.atualizadoEm) t.push(d.atualizadoEm); } });
+  return t.length?t.sort().pop():null;
+}
+/* alterações do gabinete relator feitas depois dessa análise */
+function mudancasApos(procId,gab){
+  var T=analiseTempo(procId,gab); if(!T) return [];
+  return Object.keys(S.hist||{}).map(function(k){return S.hist[k];}).filter(function(e){ return e.proc===procId&&e.tipo!=='retirada'&&String(e.em)>T; });
+}
+function alteradoApos(procId,gab){ return mudancasApos(procId,gab).length>0; }
 function outrosGabs(pa){ pa=pa||curPauta(); return GABS.filter(function(g){ return !pa||g.id!==pa.gabinete; }); }
 var ANAL_LABEL={pendente:'Pendente',sem:'Sem destaque',destacado:'Destacado'};
 function edited(p){ return p.origHash==null||C.procHash(p)!==p.origHash; }
@@ -975,11 +992,11 @@ function openPauta(pid){
   },function(e){ toast(errMsg(e),true); }));
   S.unsub.push(base.collection('analises').onSnapshot(function(snap){
     snap.docChanges().forEach(function(ch){ if(ch.type==='removed') delete S.anal[ch.doc.id]; else S.anal[ch.doc.id]=ch.doc.data(); });
-    if(loaded.p){ refreshSide(); renderCounts(); refreshDestaques(); }
+    if(loaded.p){ refreshSide(); renderCounts(); if(!formHasFocus()) renderForm(); else refreshDestaques(); }
   },function(e){ console.warn(e); }));
   S.unsub.push(base.collection('historico').onSnapshot(function(snap){
     snap.docChanges().forEach(function(ch){ if(ch.type==='removed') delete S.hist[ch.doc.id]; else S.hist[ch.doc.id]=ch.doc.data(); });
-    if(loaded.p) refreshHist();
+    if(loaded.p){ refreshHist(); refreshSide(); renderCounts(); }
   },function(e){ console.warn(e); }));
   S.unsub.push(base.collection('observacoes').where('gab','==',S.me.gab).onSnapshot(function(snap){
     snap.docChanges().forEach(function(ch){ var x=ch.doc.data(); if(ch.type==='removed') delete S.obs[x.proc]; else if(!S.dirty['pautas/'+pid+'/observacoes/'+ch.doc.id]) S.obs[x.proc]=x; });
@@ -1258,6 +1275,7 @@ function filtered(){
     if(mine&&S.filter==='alterados'&&!edited(p)) return;
     if(mine&&S.filter==='naoanal'&&analiseDe(p.id,S.me.gab)!=='pendente') return;
     if(mine&&S.filter==='semdest'&&analiseDe(p.id,S.me.gab)!=='sem') return;
+    if(mine&&S.filter==='rever'&&!alteradoApos(p.id,S.me.gab)) return;
     if(mine&&S.filter==='aguardando'&&!outrosGabs().some(function(g){ return analiseDe(p.id,g.id)==='pendente'; })) return;
     if(!mine&&S.filter!=='todos') return;
     var m=matchInfo(p,S.q); if(m.ok) out.push({p:p,m:m});
@@ -1285,6 +1303,7 @@ function refreshSide(){
      :[['naoanal','Não analisados',ps.filter(function(p){return analiseDe(p.id,S.me.gab)==='pendente';}).length],
        ['semdest','Sem destaque',ps.filter(function(p){return analiseDe(p.id,S.me.gab)==='sem';}).length],
        ['meus','Destacados por nós',ps.filter(function(p){return destOf(p.id).some(function(d){return d.gab===S.me.gab;});}).length],
+       ['rever','Alterados após nossa análise',ps.filter(function(p){return alteradoApos(p.id,S.me.gab);}).length],
        ['alterados','Alterados',ps.filter(edited).length]])
    .forEach(function(c){ chips.append(h('button',{type:'button',class:'chip'+(S.filter===c[0]?' on':''),onclick:function(){S.filter=c[0];refreshSide();}},c[1],h('span',{class:'mono',text:String(c[2])}))); });
   renderList();
@@ -1298,7 +1317,7 @@ function renderList(){
     var p=it.p, m=it.m, other=p._pauta!==undefined, pa=other&&S.pautas.find(function(x){return x.id===p._pauta;});
     var flags=h('span',{class:'flags'},
       p.situacao==='elaboracao'?h('span',{class:'pill elab',text:'Em elaboração'}):p.situacao!=='ementa'?h('span',{class:'pill sem',text:'Sem ementa'}):null,
-      !other&&edited(p)?h('span',{class:'pill ed',text:'Alterado',title:'Difere do arquivo enviado'}):null,
+      !other&&!isRelator()&&alteradoApos(p.id,S.me.gab)?h('span',{class:'pill rev',text:'Alterado após análise',title:'O gabinete relator alterou este processo depois da análise do seu gabinete'}):(!other&&edited(p)?h('span',{class:'pill ed',text:'Alterado',title:'Difere do arquivo enviado'}):null),
       other?null:outrosGabs().filter(function(g){ return analiseDe(p.id,g.id)==='sem'&&(isRelator()||g.id===S.me.gab); }).map(function(g){ return h('span',{class:'pill semd',text:g.sigla+' ✓',title:g.nome+' · analisado, sem destaque'}); }),
       other?null:destOf(p.id).map(function(d){ var g=gabById(d.gab); return h('span',{class:'pill '+(d.situacao==='acatado'?'ok':d.situacao==='nao_acatado'?'no':'dst'),text:g?g.sigla:'?',title:(g?g.nome:'')+' · '+sitLabel(d.situacao)+(d.autorNome?' · '+d.autorNome:'')}); }));
     var el=h('div',{class:'li'+(p.id===S.sel&&!other?' on':''),role:'option',tabindex:'0','aria-selected':p.id===S.sel&&!other?'true':'false','data-id':p.id},
@@ -1343,6 +1362,19 @@ function renderForm(){
   var head=h('div',{class:'phead'},h('div',{style:'min-width:0'},h1El,h('div',{class:'sub',text:'Ordem '+p.ordem+' · '+(p.classe||'Classe não informada')+' · '+(pa.meta.tipoSessao||'')+' de '+(pa.meta.dataSessao||'')})),h('div',{class:'acts'},h('button',{class:'btn sm',type:'button',title:'Recolher todos os cards',onclick:function(){setAllCards(false);}},'Recolher tudo'),h('button',{class:'btn sm',type:'button',title:'Abrir todos os cards',onclick:function(){setAllCards(true);}},'Expandir tudo'),copyBtn,linkA,nav));
   var edNote=edited(p)?h('div',{class:'ed-banner'},h('b',{text:p.origHash?'Alterado depois do envio da pauta':'Processo incluído depois do envio da pauta'}),
       h('span',{text:(p.atualizadoPor?' · última edição: '+p.atualizadoPor+' em '+fmtData(p.atualizadoEm):'')+(p.origHash?'. Use “Comparar com o original”, na ementa, ou o Histórico de alterações para ver o que mudou.':'.')})):null;
+  var revNote=null;
+  if(ro&&alteradoApos(p.id,S.me.gab)){
+    var mud=mudancasApos(p.id,S.me.gab), campos=[]; mud.forEach(function(e){ var l=campoLabel(e.campo); if(campos.indexOf(l)<0) campos.push(l); });
+    var ult=mud.slice().sort(function(x,y){return String(y.em).localeCompare(String(x.em));})[0];
+    var ciente=h('button',{class:'btn sm',type:'button',text:'Ciente: revisei a alteração'});
+    ciente.addEventListener('click',async function(){
+      ciente.disabled=true; var key=p.id+'__'+S.me.gab, mk=S.anal[key];
+      try{ await db.collection('pautas').doc(S.cur).collection('analises').doc(key).set({proc:p.id,gab:S.me.gab,status:mk&&mk.status==='sem_destaque'?'sem_destaque':'ciente',por:S.me.uid,porNome:S.me.nome,em:now()}); toast('Registrado: alteração revisada.'); if(revNote) revNote.remove(); }
+      catch(e){ toast(errMsg(e),true); ciente.disabled=false; }
+    });
+    revNote=h('div',{class:'rev-banner'},h('div',null,h('b',{text:'Alterado depois da análise do Gab '+(myG?myG.num:'')}),
+      h('span',{text:' · '+campos.join(', ')+(ult?' · por '+(ult.porNome||'?')+' em '+fmtData(ult.em):'')+'. Confira no Histórico de alterações e, se mantiver a análise, registre a ciência.'})),ciente);
+  }
   var banner=ro?h('div',{class:'ro-banner',text:'Pauta do '+(relG?'Gab '+relG.num+' · '+relG.curto:'gabinete relator')+'. Os dados do processo são editados só pelo gabinete relator; você pode registrar destaques e suas observações privadas.'}):null;
 
   var cnjHint=h('span',{class:'hint'});
@@ -1460,7 +1492,7 @@ function renderForm(){
   var histCard=h('div',{class:'card',id:'histCard'}); drawHistCard(histCard,p);
   collapsible(dados,'dados',p); collapsible(partes,'partes',p); collapsible(advs,'advogados',p); collapsible(ementa,'ementa',p);
   collapsible(outros,'outros',p); collapsible(ctrl,'resultado',p);
-  c.append(h('div',{class:'wrap'},head,edNote,banner,dados,partes,advs,ementa,outros,destCard,ctrl,histCard,foot));
+  c.append(h('div',{class:'wrap'},head,revNote,edNote,banner,dados,partes,advs,ementa,outros,destCard,ctrl,histCard,foot));
   requestAnimationFrame(function(){ autoGrow(ta); });
 }
 
@@ -1554,7 +1586,7 @@ function drawDestaquesCard(card,p,pa){
     addBtn=h('button',{class:'btn sm add',type:'button'},ico('plus'),'Adicionar destaque do Gab '+(myG?myG.num:''));
     addBtn.addEventListener('click',async function(){
       addBtn.disabled=true;
-      try{ var t=now(); var mkKey=p.id+'__'+S.me.gab; if(S.anal[mkKey]) db.collection('pautas').doc(S.cur).collection('analises').doc(mkKey).delete().catch(function(){});
+      try{ var t=now(); var mkKey=p.id+'__'+S.me.gab; if(S.anal[mkKey]&&S.anal[mkKey].status==='sem_destaque') db.collection('pautas').doc(S.cur).collection('analises').doc(mkKey).delete().catch(function(){});
         var ref=await db.collection('pautas').doc(S.cur).collection('destaques').add({proc:p.id,numero:p.numero,gab:S.me.gab,texto:'',resposta:'',situacao:'destacado',autor:S.me.uid,autorNome:S.me.nome,criadoEm:t,atualizadoEm:t});
         setTimeout(function(){ var el=document.getElementById('dt'+ref.id); if(el) el.focus(); },300); }
       catch(e){ toast(errMsg(e),true); } finally{ addBtn.disabled=false; }
@@ -1565,7 +1597,8 @@ function drawDestaquesCard(card,p,pa){
     if(souRelator){
       anal=h('div',{class:'anal'},h('span',{class:'lbl2',text:'Análise dos gabinetes:'}),outrosGabs(pa).map(function(g){
         var s=analiseDe(p.id,g.id), mk=S.anal[p.id+'__'+g.id];
-        return h('span',{class:'astat '+s,title:s==='sem'&&mk?'Marcado por '+mk.porNome+' em '+fmtData(mk.em):''},h('b',{text:g.sigla}),' '+ANAL_LABEL[s]);
+        var dep=s!=='pendente'&&alteradoApos(p.id,g.id);
+        return h('span',{class:'astat '+s+(dep?' dep':''),title:(s==='sem'&&mk?'Marcado por '+mk.porNome+' em '+fmtData(mk.em):'')+(dep?' · o processo foi alterado depois dessa análise':'')},h('b',{text:g.sigla}),' '+ANAL_LABEL[s]+(dep?' · antes da última alteração':''));
       }));
     } else {
       var s=analiseDe(p.id,S.me.gab), key=p.id+'__'+S.me.gab, mk=S.anal[key];
