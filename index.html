@@ -998,6 +998,8 @@ function curPauta(){ return S.pautas.find(function(p){return p.id===S.cur;})||nu
 function procsList(){ return Object.keys(S.procs).map(function(k){return S.procs[k];}).sort(function(a,b){return (+a.ordem||0)-(+b.ordem||0)||(a.pos||0)-(b.pos||0);}); }
 function destOf(pid){ return Object.keys(S.dest).map(function(k){return S.dest[k];}).filter(function(d){return d.proc===pid;}).sort(function(a,b){return String(a.criadoEm).localeCompare(String(b.criadoEm));}); }
 function comDestaque(p){ return destOf(p.id).length>0; }
+/* destaques numa situação: relator vê todos; os demais, só os do próprio gabinete */
+function temSit(p,sit){ var rel=isRelator(); return destOf(p.id).some(function(d){ return d.situacao===sit&&(rel||d.gab===S.me.gab); }); }
 /* análise por gabinete: pendente | sem | destacado */
 function analiseDe(procId,gab){ if(destOf(procId).some(function(d){return d.gab===gab;})) return 'destacado'; var mk=S.anal&&S.anal[procId+'__'+gab]; return mk&&mk.status!=='ciente'?'sem':'pendente'; }
 /* momento da última análise do gabinete: marca "sem destaque", ciência ou destaques */
@@ -1466,6 +1468,8 @@ function filtered(){
     if(mine&&S.filter==='naoanal'&&analiseDe(p.id,S.me.gab)!=='pendente') return;
     if(mine&&S.filter==='semdest'&&analiseDe(p.id,S.me.gab)!=='sem') return;
     if(mine&&S.filter==='rever'&&!alteradoApos(p.id,S.me.gab)) return;
+    if(mine&&S.filter==='acatado'&&!temSit(p,'acatado')) return;
+    if(mine&&S.filter==='naoacatado'&&!temSit(p,'nao_acatado')) return;
     if(mine&&S.filter==='aguardando'&&!outrosGabs().some(function(g){ return analiseDe(p.id,g.id)==='pendente'; })) return;
     if(!mine&&S.filter!=='todos') return;
     var m=matchInfo(p,S.q); if(m.ok) out.push({p:p,m:m});
@@ -1489,10 +1493,13 @@ function refreshSide(){
   var ps=procsList(), rel=isRelator();
   [['todos','Todos',ps.length],['ementa','Com ementa',ps.filter(function(p){return p.situacao==='ementa';}).length],['elaboracao','Em elaboração',ps.filter(function(p){return p.situacao==='elaboracao';}).length],
    ['destaque',rel?'Destaques recebidos':'Com destaque',ps.filter(comDestaque).length]]
+   .concat(rel?[['acatado','Destaque acatado',ps.filter(function(p){return temSit(p,'acatado');}).length],['naoacatado','Destaque não acatado',ps.filter(function(p){return temSit(p,'nao_acatado');}).length]]:[])
    .concat(rel?[['aguardando','Aguardando análise',ps.filter(function(p){ return outrosGabs().some(function(g){ return analiseDe(p.id,g.id)==='pendente'; }); }).length],['alterados','Alterados',ps.filter(edited).length]]
      :[['naoanal','Não analisados',ps.filter(function(p){return analiseDe(p.id,S.me.gab)==='pendente';}).length],
        ['semdest','Sem destaque',ps.filter(function(p){return analiseDe(p.id,S.me.gab)==='sem';}).length],
        ['meus','Destacados por nós',ps.filter(function(p){return destOf(p.id).some(function(d){return d.gab===S.me.gab;});}).length],
+       ['acatado','Destaque acatado',ps.filter(function(p){return temSit(p,'acatado');}).length],
+       ['naoacatado','Destaque não acatado',ps.filter(function(p){return temSit(p,'nao_acatado');}).length],
        ['rever','Alterados após nossa análise',ps.filter(function(p){return alteradoApos(p.id,S.me.gab);}).length],
        ['alterados','Alterados',ps.filter(edited).length]])
    .forEach(function(c){ chips.append(h('button',{type:'button',class:'chip'+(S.filter===c[0]?' on':''),onclick:function(){S.filter=c[0];refreshSide();}},c[1],h('span',{class:'mono',text:String(c[2])}))); });
