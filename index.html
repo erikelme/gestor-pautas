@@ -295,7 +295,7 @@ var CNJ='\\d{7}-\\d{2}\\.\\d{4}\\.\\d\\.\\d{2}\\.\\d{4}';
 var RE_HEAD=new RegExp('^\\s*(\\d+)\\s*-\\s*('+CNJ+')\\s*-\\s*(.+?)\\s*$');
 var RE_CLASSE=new RegExp('^\\s*(.+?)\\s*(?:\\((\\d+)\\))?\\s*N\\s*[ºo°.]\\s*('+CNJ+')\\s*$');
 var RE_PARTE=/^\s*([A-ZÀ-Ý][A-ZÀ-Ý()\/ .\-]{1,48}?)\s*:\s*(.*\S)\s*$/;
-var RE_ADV=/^ADVOGADO\s+do\(a\)\s+([^:]+?)\s*:\s*(.+?)\s*$/i;
+var RE_ADV=/^ADVOGAD[OA]S?\s+(?:d[oa]s?\s*\([^)]*\)|d[oa]s?)\s+([^:]+?)\s*:\s*(.+?)\s*$/i;
 var RE_OAB=/^(.*?)\s+-\s+([A-Z]{2}\s?\d[\dA-Z.\-\/]*)$/;
 var ELAB='DOCUMENTOS EM ELABORAÇÃO.';
 
@@ -362,8 +362,8 @@ function parseBlock(nodes,rels){
     if(/^EMENTA:?$/i.test(t)){ phase='ementa'; p.situacao='ementa'; roles.push('ementaLabel'); continue; }
     var mc=RE_CLASSE.exec(t);
     if(mc){ p.classeCompleta=mc[1]; p.codClasse=mc[2]||''; roles.push('classe'); continue; }
-    if(/^ADVOGADO\s+do\(a\)/i.test(t)){
-      t.split(/(?=ADVOGADO\s+do\(a\)\s)/i).forEach(function(part){
+    if(/^ADVOGAD[OA]S?\s+(?:d[oa]s?\s*\(|d[oa]s?\s)/i.test(t)){
+      t.split(/(?=ADVOGAD[OA]S?\s+(?:d[oa]s?\s*\(|d[oa]s?\s))/i).forEach(function(part){
         var ma=RE_ADV.exec(part.trim()); if(!ma) return;
         var mo=RE_OAB.exec(ma[2]);
         p.advogados.push({polo:ma[1].trim(),nome:(mo?mo[1]:ma[2]).trim(),oab:mo?mo[2].trim():''});
@@ -733,57 +733,129 @@ async function buildDestaquesDocx(meta,processos){
 /* ───── PDF → .docx equivalente (pautas geradas pelo sistema, com texto) ───── */
 async function pdfToDocx(buf,pdfjs){
   var doc=await pdfjs.getDocument({data:new Uint8Array(buf.slice?buf.slice(0):buf),verbosity:0}).promise;
-  var lines=[], links=[];
+  var lines=[], links=[], pageH={};
   for(var pn=1;pn<=doc.numPages;pn++){
-    var pg=await doc.getPage(pn), tc=await pg.getTextContent(), an=[];
+    var pg=await doc.getPage(pn), vp=pg.getViewport({scale:1}), tc=await pg.getTextContent(), an=[];
+    pageH[pn]=vp.height;
     try{ an=await pg.getAnnotations(); }catch(e){}
-    an.forEach(function(a){ if(a.subtype==='Link'&&a.url) links.push({page:pn,y1:Math.min(a.rect[1],a.rect[3])-2,y2:Math.max(a.rect[1],a.rect[3])+2,url:a.url}); });
+    an.forEach(function(a){ if(a.subtype==='Link'&&a.url){ var r=vp.convertToViewportRectangle(a.rect); links.push({page:pn,y1:vp.height-Math.max(r[1],r[3])-2,y2:vp.height-Math.min(r[1],r[3])+2,url:a.url}); } });
     var rows=[];
     tc.items.forEach(function(it){
       if(it.str==null) return;
-      var x=it.transform[4], y=it.transform[5], sz=Math.abs(it.transform[3])||it.height||10;
+      var m=pdfjs.Util.transform(vp.transform,it.transform);
+      var x=m[4], y=vp.height-m[5], sz=Math.hypot(m[2],m[3])||it.height||10;
       var r=null; for(var i=0;i<rows.length;i++){ if(Math.abs(rows[i].y-y)<=Math.max(2,sz*0.3)){ r=rows[i]; break; } }
       if(!r){ r={y:y,items:[],sz:0}; rows.push(r); }
-      r.items.push({x:x,s:it.str,w:it.width||0,f:it.fontName}); if(it.str.trim()) r.sz=Math.max(r.sz,sz);
+      r.items.push({x:x,s:it.str,w:it.width||0}); if(it.str.trim()) r.sz=Math.max(r.sz,sz);
     });
     rows.forEach(function(r){
       r.items.sort(function(a,b){return a.x-b.x;});
-      var t='', x0=null, x1=0;
-      r.items.forEach(function(it){ t+=it.s; if(it.s.trim()){ if(x0===null) x0=it.x; x1=Math.max(x1,it.x+it.w); } });
+      var t='', x0=null, x1=0, lastEnd=null;
+      r.items.forEach(function(it){
+        if(lastEnd!==null&&it.s&&!/^\s/.test(it.s)&&!/\s$/.test(t)&&it.x-lastEnd>r.sz*0.15) t+=' ';
+        t+=it.s; if(it.s.trim()){ if(x0===null) x0=it.x; x1=Math.max(x1,it.x+it.w); } lastEnd=it.x+it.w;
+      });
       t=t.replace(/\s+/g,' ').trim(); if(!t) return;
       lines.push({page:pn,y:r.y,x:x0,w:x1-x0,sz:r.sz,t:t});
     });
   }
   if(!lines.length) throw new Error('Este PDF não tem texto selecionável (parece digitalizado). Envie a pauta em .docx ou um PDF gerado pelo sistema.');
   lines.sort(function(a,b){ return a.page-b.page||b.y-a.y||a.x-b.x; });
+
+  var headRe0=new RegExp('^\\s*\\d+\\s*-\\s*'+CNJ+'\\s*-\\s*.+$');
+  /* modelo do gabinete: "Chamada N. Processo nº ..." */
+  var chamadaRe=new RegExp('^Chamada\\s+(\\d+)\\s*[.\\-–:]?\\s*Processo\\s+n\\s*[º°o.]*\\s*\\.?\\s*('+CNJ+')','i');
+  var modelB=lines.some(function(l){ return chamadaRe.test(l.t); });
+  var metaB=null;
+  if(modelB){
+    var p1=lines.filter(function(l){return l.page===1;}), fc=p1.findIndex(function(l){return chamadaRe.test(l.t);});
+    var pre=(fc<0?p1:p1.slice(0,fc)).map(function(l){return l.t;});
+    var trib=pre.find(function(s){return /tribunal/i.test(s);})||'';
+    var gabL=pre.find(function(s){return /gabinete\s*\d+/i.test(s);})||'';
+    var mg=/gabinete\s*(\d+)\s*(?:da|-|–)?\s*(\d+\s*ª?\s*turma)?/i.exec(gabL);
+    var iDes=pre.findIndex(function(s){return /^desembargador/i.test(s);});
+    var rel=iDes>=0?(pre[iDes]+' '+(pre[iDes+1]&&!/sess|turma/i.test(pre[iDes+1])?pre[iDes+1]:'')).trim():'';
+    var sl=pre.find(function(s){return /sess[ãa]o/i.test(s);})||'';
+    var ms=/(sess[ãa]o\s+[a-zà-ú]+)/i.exec(sl), md=/(\d{2})[.\/](\d{2})[.\/](\d{4})/.exec(sl);
+    var turma=(mg&&mg[2])?mg[2].replace(/\s+/g,'').replace(/turma/i,' Turma'):(/(\d+\s*ª)\s*turma/i.exec(gabL+' '+sl)||[])[1];
+    if(!turma&&/oitava/i.test(sl)) turma='8ª Turma';
+    metaB={tribunal:trib?trib.replace(/TRIBUNAL REGIONAL FEDERAL DA 5\.?ª REGIÃO/i,'Tribunal Regional Federal da 5ª Região'):'',
+      orgao:(turma?turma.replace(/ª?\s*Turma/i,'ª Turma')+' / ':'')+(mg?'Gab '+mg[1]:'Gabinete')+(rel?' - '+rel:''),
+      sessao:(ms?ms[1].replace(/^s/,'S'):'Sessão')+': '+(md?md[1]+'/'+md[2]+'/'+md[3]:'')};
+  }
+
+  /* cabeçalho e rodapé repetidos: primeiras e últimas linhas de cada página */
+  var npages=doc.numPages;
+  if(npages>=3){
+    var byPage={}; lines.forEach(function(l){ (byPage[l.page]=byPage[l.page]||[]).push(l); });
+    var edge=new Set(), cnt={};
+    Object.keys(byPage).forEach(function(pn){ var ls=byPage[pn]; ls.slice(0,4).concat(ls.slice(-2)).forEach(function(l){ edge.add(l); var k=l.t.replace(/\d+/g,'#'); cnt[k]=cnt[k]||{}; cnt[k][pn]=1; }); });
+    var protect=function(t){ return /^EMENTA\b/i.test(t)||headRe0.test(t)||chamadaRe.test(t); };
+    lines=lines.filter(function(l){
+      if(!edge.has(l)||protect(l.t)) return true;
+      var ls=byPage[l.page]; if(/^(p[áa]g(ina)?\.?\s*)?\d{1,4}(\s*(de|\/)\s*\d{1,4})?$/i.test(l.t)&&ls.indexOf(l)>=ls.length-2) return false;
+      var k=l.t.replace(/\d+/g,'#'); return !(Object.keys(cnt[k]).length>=Math.max(3,npages*0.4)); });
+  }
+  if(modelB){ var fi=lines.findIndex(function(l){return chamadaRe.test(l.t);}); if(fi>0){ var keep=lines.slice(0,fi).filter(function(l){ return isSection(l.t); }); lines=keep.concat(lines.slice(fi)); } }
+  function isSection(t){ return /^[A-ZÀ-Ý][A-ZÀ-Ý \/–\-]{3,40}$/.test(t)&&!/:/.test(t)&&t.split(' ').length<=5&&!/PODER JUDICI|TRIBUNAL|GABINETE|DESEMBARGADOR/.test(t); }
+
   var maxW=0, xs={}; lines.forEach(function(l){ if(l.w>maxW) maxW=l.w; var k=Math.round(l.x); xs[k]=(xs[k]||0)+1; });
+  var ws=lines.map(function(l){return l.w;}).filter(function(w){return w>maxW*0.6;}).sort(function(a,b){return a-b;}); var fullW=ws.length?ws[Math.floor(ws.length*0.6)]:maxW;
   var left=+Object.keys(xs).sort(function(a,b){return xs[b]-xs[a];})[0];
   var headRe=new RegExp('^\\s*\\d+\\s*-\\s*'+CNJ+'\\s*-\\s*.+$');
-  var labelRe=/^(ADVOGADO\s+do\(a\)|[A-ZÀ-Ý][A-ZÀ-Ý()\/ .\-]{1,48}:)/;
-  var paras=[], cur=null, prev=null, firstHead=-1;
-  function linkFor(l){ for(var i=0;i<links.length;i++){ var k=links[i]; if(k.page===l.page&&l.y>=k.y1&&l.y<=k.y2) return k.url; } return ''; }
-  function push(kind,l){ cur={kind:kind,lines:[l.t],center:l.x>left+20,link:'',sz:l.sz}; if(kind==='head'){ cur.link=linkFor(l); } paras.push(cur); }
+  var labelRe=/^(ADVOGAD[OA]S?\s+d[oa]s?\([^)]*\)|ADVOGAD[OA]S?\s+D[OA]S?\s|[A-ZÀ-Ý][A-ZÀ-Ý()\/ .\-]{1,48}:)/;
+  var paras=[], cur=null, prev=null, firstHead=-1, zone='pre';
+  function linkFor(l){ for(var i=0;i<links.length;i++){ var k=links[i]; if(k.page===l.page&&l.y>=k.y1-4&&l.y<=k.y2+4) return k.url; } return ''; }
+  function push(kind,l,t){ cur={kind:kind,lines:[t==null?l.t:t],center:l.x>left+20,link:'',sz:l.sz}; if(kind==='head') cur.link=linkFor(l); paras.push(cur); }
   lines.forEach(function(l){
-    var isHead=headRe.test(l.t);
-    if(isHead){ if(firstHead<0) firstHead=paras.length; push('head',l); prev=l; cur=null; return; }
-    var isLabel=/^EMENTA:?$/i.test(l.t);
-    if(isLabel){ push('label',l); prev=l; cur=null; return; }
+    var isHead=headRe.test(l.t)||chamadaRe.test(l.t);
+    if(isHead){ if(firstHead<0) firstHead=paras.length; push('head',l); zone='partes'; prev=l; cur=null; return; }
+    if(modelB&&isSection(l.t)&&l.x>left+20){ push('section',l); prev=l; cur=null; return; }
+    var me=/^EMENTA\s*:?\s*(.*)$/i.exec(l.t);
+    if(me&&zone!=='ementa'&&(me[1]===''||/^EMENTA\s*:/i.test(l.t))){ push('label',l,'EMENTA'); zone='ementa'; prev=l; cur=null; if(me[1].trim()){ push('body',l,me[1].trim()); } prev=l; return; }
     var newPara=true;
     if(cur&&prev){
-      if(prev.page===l.page){ var gap=prev.y-l.y, lh=Math.max(prev.sz,l.sz)*1.25; newPara=gap>lh*1.35; }
-      else newPara=!(prev.w>=maxW*0.9&&!labelRe.test(l.t)&&cur.kind==='body');
-      if(firstHead<0&&cur&&!newPara) newPara=false;
+      if(prev.page===l.page){ var gap=prev.y-l.y, lh=Math.max(prev.sz,l.sz)*1.25; newPara=gap>lh*1.35;
+        if(!newPara&&modelB&&zone==='ementa'&&cur.kind==='body'&&/^\d{1,3}\s*\.\s*[A-ZÀ-Ý]/.test(l.t)&&(/[.;!?)"”]$/.test(prev.t)||prev.w<fullW*0.94)) newPara=true;
+        if(!newPara&&zone==='ementa'&&cur.kind==='body'&&prev.w<fullW*0.94&&/[.;!?)"”]$/.test(prev.t)&&/^(\d+\s*[.)\-–]\s|[IVX]+\.\s|[A-ZÀ-Ý])/.test(l.t)) newPara=true; }
+      else newPara=!(prev.w>=fullW*0.94&&!labelRe.test(l.t)&&cur.kind==='body'&&!(/[.;:!?)"”]$/.test(prev.t)&&/^(\d+\s*[.)\-–]\s|[IVX]+\.\s|[A-ZÀ-Ý])/.test(l.t)));
+      if(firstHead<0) newPara=newPara&&cur.kind!=='pre'?true:newPara;
+      if(!newPara&&zone==='partes'&&labelRe.test(l.t)&&!/(d[oa]s?\([^)]*\)|ADVOGAD[OA]S?)$/i.test(prev.t)) newPara=true;
     }
-    if(newPara){ push(firstHead<0?'pre':'body',l); }
-    else cur.lines.push(l.t);
+    if(newPara) push(firstHead<0?'pre':'body',l); else cur.lines.push(l.t);
     prev=l;
   });
-  // monta o texto de cada parágrafo
   paras.forEach(function(p){
     if(p.kind==='pre'&&p.lines.length>1&&p.center){ p.text=p.lines.join('\n'); return; }
     var t=''; p.lines.forEach(function(s,i){ if(i===0){ t=s; return; } if(/[A-Za-zÀ-ÿ0-9]-$/.test(t)&&/^[A-Za-zÀ-ÿ0-9]/.test(s)) t+=s; else t+=' '+s; });
-    p.text=t;
+    p.text=t.replace(/\s+/g,' ').trim();
   });
+
+  /* normaliza o modelo do gabinete para a estrutura padrão */
+  if(modelB){
+    var CLS={'APELAÇÕES':'APELAÇÃO CÍVEL','APELACOES':'APELAÇÃO CÍVEL','AGRAVOS':'AGRAVO DE INSTRUMENTO','AGRAVOS DE INSTRUMENTO':'AGRAVO DE INSTRUMENTO','EMBARGOS DE DECLARAÇÃO':'EMBARGOS DE DECLARAÇÃO CÍVEL','REMESSAS NECESSÁRIAS':'REMESSA NECESSÁRIA CÍVEL','REMESSA NECESSÁRIA':'REMESSA NECESSÁRIA CÍVEL','APELAÇÕES CRIMINAIS':'APELAÇÃO CRIMINAL'};
+    var out=[{kind:'pre',center:true,sz:14,text:[metaB.tribunal,metaB.orgao,metaB.sessao].filter(Boolean).join('\n')},{kind:'pre',center:true,sz:16,text:'RELAÇÃO DE JULGAMENTO'}];
+    var classe='', inProc=false, z='';
+    paras.forEach(function(p){
+      if(p.kind==='pre') return;
+      if(p.kind==='section'){ classe=CLS[p.text.toUpperCase()]||p.text.toUpperCase(); return; }
+      if(p.kind==='head'){ var m=chamadaRe.exec(p.text); var ord=m[1], num=m[2];
+        out.push({kind:'head',text:ord+' - '+num+' - '+(classe||'PROCESSO'),link:p.link}); out.push({kind:'body',text:(classe||'PROCESSO')+' Nº '+num}); z='partes'; return; }
+      if(p.kind==='label'){ out.push({kind:'label'}); z='ementa'; return; }
+      if(z==='partes'&&/^ADVOGAD/i.test(p.text)){
+        var ma=/^ADVOGAD[OA]S?\s+(?:d[oa]s?\s*\([^)]*\)|d[oa]s?)\s+([^:]+?)\s*:\s*(.+)$/i.exec(p.text);
+        if(ma){ var polo=ma[1].trim(), rest=ma[2].replace(/\s-\s*OAB\s*/gi,' - ');
+          var parts=rest.split(/(?<=\s-\s*[A-Z]{2}\s?\d[\dA-Z.\-\/]*)\s*(?:\s(?:E|e)\s|,|;)\s*/);
+          out.push({kind:'body',text:parts.map(function(s){ return 'ADVOGADO do(a) '+polo+': '+s.trim(); }).join(' ')}); return; }
+      }
+      out.push(p);
+    });
+    /* remessa com apelante → APELAÇÃO / REMESSA NECESSÁRIA */
+    for(var oi=0;oi<out.length;oi++){ if(out[oi].kind!=='head'||!/REMESSA NECESSÁRIA CÍVEL$/.test(out[oi].text)) continue;
+      var temApel=false; for(var oj=oi+2;oj<out.length&&out[oj].kind!=='head'&&out[oj].kind!=='label';oj++){ if(/^APELANTES?\s*:/i.test(out[oj].text||'')) temApel=true; }
+      if(temApel){ out[oi].text=out[oi].text.replace(/REMESSA NECESSÁRIA CÍVEL$/,'APELAÇÃO / REMESSA NECESSÁRIA'); out[oi+1].text=out[oi+1].text.replace(/^REMESSA NECESSÁRIA CÍVEL/,'APELAÇÃO / REMESSA NECESSÁRIA'); } }
+    paras=out;
+  }
   // XML
   var rels=[], rid=0;
   function run(t,rpr){ return '<w:r><w:rPr>'+rpr+'</w:rPr><w:t xml:space="preserve">'+xesc(t)+'</w:t></w:r>'; }
