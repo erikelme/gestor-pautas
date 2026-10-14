@@ -249,9 +249,10 @@ body.dragging .drop-over{display:flex}
       <select class="pick" id="pick" hidden></select>
       <span class="grow"></span>
       <span class="save" id="save" aria-live="polite"><span class="dot"></span><span id="saveTxt">Conectando…</span></span>
-      <input type="file" id="file" class="vh" accept=".docx">
+      <input type="file" id="file" class="vh" accept=".docx,.pdf">
       <button class="btn" id="up" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>Enviar pauta</button>
       <button class="btn" id="dst" type="button" hidden title="Tabela só com os processos com destaque, sem a ementa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4h11l-2 4 2 4H5"/></svg>Destaques (.docx)</button>
+      <button class="btn" id="vpdf" type="button" hidden title="Abrir o PDF enviado"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/></svg>Ver PDF original</button>
       <button class="btn" id="csv" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10h16M4 15h16M10 4v16"/></svg>Planilha</button>
       <button class="btn primary" id="dl" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4v12M7 11l5 5 5-5M5 20h14"/></svg><span>Baixar pauta (.docx)</span></button>
       <span class="who-chip" id="who"></span>
@@ -268,7 +269,7 @@ body.dragging .drop-over{display:flex}
   </div>
   <div class="main" id="main"><div class="loading" style="grid-column:1/-1">Carregando pautas…</div></div>
 </div>
-<div class="drop-over" aria-hidden="true">Solte a pauta (.docx) para extrair</div>
+<div class="drop-over" aria-hidden="true">Solte a pauta (.docx ou PDF) para extrair</div>
 <div id="toastHost" aria-live="assertive"></div>
 
 <datalist id="dl-polos"><option>APELANTE</option><option>APELADO</option><option>AGRAVANTE</option><option>AGRAVADO</option><option>EMBARGANTE</option><option>EMBARGADO</option><option>AUTOR</option><option>REU</option><option>IMPETRANTE</option><option>IMPETRADO</option><option>RECORRENTE</option><option>RECORRIDO</option><option>REQUERENTE</option><option>REQUERIDO</option><option>TERCEIRO INTERESSADO</option><option>INTERESSADO</option><option>REPRESENTANTE</option></datalist>
@@ -728,6 +729,97 @@ async function buildDestaquesDocx(meta,processos){
   return zip;
 }
 
+
+/* ───── PDF → .docx equivalente (pautas geradas pelo sistema, com texto) ───── */
+async function pdfToDocx(buf,pdfjs){
+  var doc=await pdfjs.getDocument({data:new Uint8Array(buf.slice?buf.slice(0):buf),verbosity:0}).promise;
+  var lines=[], links=[];
+  for(var pn=1;pn<=doc.numPages;pn++){
+    var pg=await doc.getPage(pn), tc=await pg.getTextContent(), an=[];
+    try{ an=await pg.getAnnotations(); }catch(e){}
+    an.forEach(function(a){ if(a.subtype==='Link'&&a.url) links.push({page:pn,y1:Math.min(a.rect[1],a.rect[3])-2,y2:Math.max(a.rect[1],a.rect[3])+2,url:a.url}); });
+    var rows=[];
+    tc.items.forEach(function(it){
+      if(it.str==null) return;
+      var x=it.transform[4], y=it.transform[5], sz=Math.abs(it.transform[3])||it.height||10;
+      var r=null; for(var i=0;i<rows.length;i++){ if(Math.abs(rows[i].y-y)<=Math.max(2,sz*0.3)){ r=rows[i]; break; } }
+      if(!r){ r={y:y,items:[],sz:0}; rows.push(r); }
+      r.items.push({x:x,s:it.str,w:it.width||0,f:it.fontName}); if(it.str.trim()) r.sz=Math.max(r.sz,sz);
+    });
+    rows.forEach(function(r){
+      r.items.sort(function(a,b){return a.x-b.x;});
+      var t='', x0=null, x1=0;
+      r.items.forEach(function(it){ t+=it.s; if(it.s.trim()){ if(x0===null) x0=it.x; x1=Math.max(x1,it.x+it.w); } });
+      t=t.replace(/\s+/g,' ').trim(); if(!t) return;
+      lines.push({page:pn,y:r.y,x:x0,w:x1-x0,sz:r.sz,t:t});
+    });
+  }
+  if(!lines.length) throw new Error('Este PDF não tem texto selecionável (parece digitalizado). Envie a pauta em .docx ou um PDF gerado pelo sistema.');
+  lines.sort(function(a,b){ return a.page-b.page||b.y-a.y||a.x-b.x; });
+  var maxW=0, xs={}; lines.forEach(function(l){ if(l.w>maxW) maxW=l.w; var k=Math.round(l.x); xs[k]=(xs[k]||0)+1; });
+  var left=+Object.keys(xs).sort(function(a,b){return xs[b]-xs[a];})[0];
+  var headRe=new RegExp('^\\s*\\d+\\s*-\\s*'+CNJ+'\\s*-\\s*.+$');
+  var labelRe=/^(ADVOGADO\s+do\(a\)|[A-ZÀ-Ý][A-ZÀ-Ý()\/ .\-]{1,48}:)/;
+  var paras=[], cur=null, prev=null, firstHead=-1;
+  function linkFor(l){ for(var i=0;i<links.length;i++){ var k=links[i]; if(k.page===l.page&&l.y>=k.y1&&l.y<=k.y2) return k.url; } return ''; }
+  function push(kind,l){ cur={kind:kind,lines:[l.t],center:l.x>left+20,link:'',sz:l.sz}; if(kind==='head'){ cur.link=linkFor(l); } paras.push(cur); }
+  lines.forEach(function(l){
+    var isHead=headRe.test(l.t);
+    if(isHead){ if(firstHead<0) firstHead=paras.length; push('head',l); prev=l; cur=null; return; }
+    var isLabel=/^EMENTA:?$/i.test(l.t);
+    if(isLabel){ push('label',l); prev=l; cur=null; return; }
+    var newPara=true;
+    if(cur&&prev){
+      if(prev.page===l.page){ var gap=prev.y-l.y, lh=Math.max(prev.sz,l.sz)*1.25; newPara=gap>lh*1.35; }
+      else newPara=!(prev.w>=maxW*0.9&&!labelRe.test(l.t)&&cur.kind==='body');
+      if(firstHead<0&&cur&&!newPara) newPara=false;
+    }
+    if(newPara){ push(firstHead<0?'pre':'body',l); }
+    else cur.lines.push(l.t);
+    prev=l;
+  });
+  // monta o texto de cada parágrafo
+  paras.forEach(function(p){
+    if(p.kind==='pre'&&p.lines.length>1&&p.center){ p.text=p.lines.join('\n'); return; }
+    var t=''; p.lines.forEach(function(s,i){ if(i===0){ t=s; return; } if(/[A-Za-zÀ-ÿ0-9]-$/.test(t)&&/^[A-Za-zÀ-ÿ0-9]/.test(s)) t+=s; else t+=' '+s; });
+    p.text=t;
+  });
+  // XML
+  var rels=[], rid=0;
+  function run(t,rpr){ return '<w:r><w:rPr>'+rpr+'</w:rPr><w:t xml:space="preserve">'+xesc(t)+'</w:t></w:r>'; }
+  var ARIAL='<w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>';
+  var body='', seenHead=false;
+  paras.forEach(function(p){
+    if(p.kind==='pre'){
+      var big=p.sz>=13, rpr=ARIAL+(big||p.center?'<w:b/>':'<w:b w:val="false"/>')+'<w:color w:val="000000"/><w:sz w:val="'+(p.sz>=15?32:big?28:22)+'"/>';
+      var runs=p.text.split('\n').map(function(s,i){ return (i?'<w:r><w:br/></w:r>':'')+run(' '+s+' ',rpr); }).join('');
+      body+='<w:p><w:pPr><w:spacing w:before="269" w:after="269"/><w:ind w:left="0"/><w:jc w:val="'+(p.center?'center':'both')+'"/></w:pPr>'+runs+'</w:p>';
+      return;
+    }
+    if(p.kind==='head'){
+      if(seenHead) body+=DEFAULT_TPL.pageBreak.replace(' xmlns:w="'+W+'"','');
+      else if(paras.indexOf(p)>0) body+=DEFAULT_TPL.spacer.replace(' xmlns:w="'+W+'"','');
+      seenHead=true;
+      var r=run(p.text,'<w:b/><w:color w:val="FF0000"/><w:sz w:val="28"/><w:szCs w:val="28"/>');
+      if(p.link){ rid++; rels.push('<Relationship Id="rIdPdf'+rid+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="'+xesc(p.link)+'" TargetMode="External"/>'); r='<w:hyperlink r:id="rIdPdf'+rid+'">'+r+'</w:hyperlink>'; }
+      body+='<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'+r+'</w:p>';
+      return;
+    }
+    if(p.kind==='label'){ body+=DEFAULT_TPL.ementaLabel.replace(' xmlns:w="'+W+'"',''); return; }
+    if(/^DOCUMENTOS EM ELABORA/i.test(p.text)){ body+=DEFAULT_TPL.elab.replace(' xmlns:w="'+W+'"',''); return; }
+    body+='<w:p><w:pPr><w:spacing w:before="269" w:after="269"/><w:ind w:left="0"/><w:jc w:val="both"/></w:pPr>'+run(p.text,ARIAL+'<w:b w:val="false"/><w:i w:val="false"/><w:color w:val="000000"/><w:sz w:val="22"/>')+'</w:p>';
+  });
+  body+=DEFAULT_TPL.spacer.replace(' xmlns:w="'+W+'"','');
+  var docXml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="'+W+'" xmlns:r="'+R+'"><w:body>'+body+'<w:sectPr><w:pgSz w:w="11907" w:h="16839" w:code="9"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>';
+  var zip=new JSZip();
+  zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>');
+  zip.file('_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="'+PR+'"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  zip.file('word/_rels/document.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="'+PR+'"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'+rels.join('')+'</Relationships>');
+  zip.file('word/styles.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="'+W+'"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="22"/><w:lang w:val="pt-BR"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>');
+  zip.file('word/document.xml',docXml);
+  return zip.generateAsync({type:'arraybuffer'});
+}
+
 /* número CNJ: confere o dígito verificador (Res. CNJ 65/2008) */
 function cnjOk(n){
   var m=/^(\d{7})-(\d{2})\.(\d{4})\.(\d)\.(\d{2})\.(\d{4})$/.exec(n||''); if(!m) return null;
@@ -735,7 +827,7 @@ function cnjOk(n){
   for(var i=0;i<s.length;i++) r=(r*10+(+s[i]))%97;
   return ('0'+(98-r)).slice(-2)===m[2];
 }
-return {diffWords:diffWords,extract:extract,buildDocx:buildDocx,buildDestaquesDocx:buildDestaquesDocx,procHash:procHash,cnjOk:cnjOk,partyLines:partyLines,classeLine:classeLine,ELAB:ELAB};
+return {pdfToDocx:pdfToDocx,diffWords:diffWords,extract:extract,buildDocx:buildDocx,buildDestaquesDocx:buildDestaquesDocx,procHash:procHash,cnjOk:cnjOk,partyLines:partyLines,classeLine:classeLine,ELAB:ELAB};
 })();
 
 
@@ -977,7 +1069,7 @@ function openPauta(pid){
       var id=ch.doc.id, path='pautas/'+pid+'/processos/'+id;
       if(ch.type==='removed'){ delete S.procs[id]; if(S.sel===id){ S.sel=null; selChanged=true; } return; }
       if(S.dirty[path]&&S.procs[id]) return;          // edição local ainda não gravada
-      var x=ch.doc.data(); x.id=id; S.procs[id]=x; if(id===S.sel) selChanged=true; if(!Hist.open[id]){ Hist.base[id]=snapFields(x); Hist.pid[id]=pid; }
+      var x=ch.doc.data(); x.id=id; var same=S.procs[id]&&JSON.stringify(snapFields(S.procs[id]))===JSON.stringify(snapFields(x)); S.procs[id]=x; if(id===S.sel&&!same) selChanged=true; if(!Hist.open[id]){ Hist.base[id]=snapFields(x); Hist.pid[id]=pid; }
     });
     if(!loaded.p){ loaded.p=true; var ps=procsList(); S.sel=S.sel||(ps[0]&&ps[0].id)||null; renderMain(); return; }
     refreshSide(); renderCounts();
@@ -1008,20 +1100,24 @@ function formHasFocus(){ var c=$('#content'); return c&&c.contains(document.acti
 
 /* ═════════ ENVIO DA PAUTA ═════════ */
 async function importFile(file){
-  if(!/\.docx$/i.test(file.name)){ toast(/\.doc$/i.test(file.name)?'Arquivos .doc antigos não são lidos. Salve como .docx e envie de novo.':'Envie a pauta no formato .docx, como ela sai do sistema.',true); return; }
+  var isPdf=/\.pdf$/i.test(file.name);
+  if(!isPdf&&!/\.docx$/i.test(file.name)){ toast(/\.doc$/i.test(file.name)?'Arquivos .doc antigos não são lidos. Salve como .docx e envie de novo.':'Envie a pauta em .docx ou PDF, como ela sai do sistema.',true); return; }
   var btn=$('#up'); btn.disabled=true;
   try{
-    var buf=await file.arrayBuffer();
+    var pdfBuf=null, buf=await file.arrayBuffer();
+    if(isPdf){ toast('Lendo o PDF…'); var lib=await loadPdfJs(); pdfBuf=buf; buf=await C.pdfToDocx(buf,lib); }
     var r=await C.extract(buf);
     var gab=gabFromText(r.meta.orgao)||S.me.gab;
     var dup=S.pautas.find(function(x){ return x.gabinete===gab&&x.meta.dataSessao===r.meta.dataSessao&&x.meta.tipoSessao===r.meta.tipoSessao; });
     if(dup){ toast('Esta pauta já está no sistema (enviada por '+(dup.criadoPorNome||'outro usuário')+'). Abrindo a existente.'); openPauta(dup.id); return; }
     var ref=db.collection('pautas').doc();
     var b64=b64FromBuf(buf), CH=700000, n=Math.ceil(b64.length/CH);
-    await ref.set({nome:file.name,arquivo:file.name,meta:r.meta,metaOriginal:clone(r.meta),gabinete:gab,nProcessos:r.processos.length,partesArquivo:n,
+    var pdfB64=pdfBuf?b64FromBuf(pdfBuf):'', np=pdfB64?Math.ceil(pdfB64.length/CH):0;
+    await ref.set({nome:file.name,arquivo:file.name.replace(/\.pdf$/i,'.docx'),fonte:isPdf?'pdf':'docx',arquivoPdf:isPdf?file.name:'',partesPdf:np,meta:r.meta,metaOriginal:clone(r.meta),gabinete:gab,nProcessos:r.processos.length,partesArquivo:n,
       criadoPor:S.me.uid,criadoPorNome:S.me.nome,criadoEm:now(),atualizadoEm:now()});
     var writes=[];
     for(var i=0;i<n;i++) writes.push([ref.collection('arquivo').doc(String(i)),{i:i,n:n,b64:b64.slice(i*CH,(i+1)*CH)}]);
+    for(var q=0;q<np;q++) writes.push([ref.collection('arquivoPdf').doc(String(q)),{i:q,n:np,b64:pdfB64.slice(q*CH,(q+1)*CH)}]);
     r.processos.forEach(function(p,k){ p.pos=k; p.resultado=''; p.relator=''; writes.push([ref.collection('processos').doc('p'+String(k).padStart(3,'0')),p]); });
     for(var j=0;j<writes.length;j+=200){ var bt=db.batch(); writes.slice(j,j+200).forEach(function(w){ bt.set(w[0],w[1]); }); await bt.commit(); }
     openPauta(ref.id);
@@ -1029,6 +1125,24 @@ async function importFile(file){
     toast(r.processos.length+' processos extraídos · pauta do Gab '+(g?g.num:'?')+'.'+(gab!==S.me.gab?' Só o gabinete relator edita os dados; você pode destacar.':''));
   }catch(e){ console.error(e); toast(e&&e.code?errMsg(e):(e&&e.message)||'Não foi possível ler o arquivo.',true); }
   finally{ btn.disabled=false; }
+}
+var pdfJsP=null;
+function loadPdfJs(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if(pdfJsP) return pdfJsP;
+  pdfJsP=new Promise(function(res,rej){
+    var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload=function(){ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; res(window.pdfjsLib); }catch(e){ rej(e); } };
+    s.onerror=function(){ pdfJsP=null; rej(new Error('Não foi possível carregar o leitor de PDF. Verifique a conexão e tente de novo.')); };
+    document.head.appendChild(s);
+  });
+  return pdfJsP;
+}
+async function pdfOriginal(pid){
+  var snap=await db.collection('pautas').doc(pid).collection('arquivoPdf').get();
+  var parts=snap.docs.map(function(d){return d.data();}).sort(function(a,b){return a.i-b.i;});
+  if(!parts.length||parts.length!==parts[0].n) throw new Error('O PDF original desta pauta não foi encontrado.');
+  return new Blob([bufFromB64(parts.map(function(x){return x.b64;}).join(''))],{type:'application/pdf'});
 }
 async function originalBytes(pid){
   var snap=await db.collection('pautas').doc(pid).collection('arquivo').get();
@@ -1122,7 +1236,7 @@ function drawHistCard(card,p){
 
 /* ═════════ EXPORTAÇÕES ═════════ */
 function download(name,data){ var blob=data instanceof Blob?data:new Blob([data]); var a=h('a',{href:URL.createObjectURL(blob),download:name}); document.body.append(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(a.href);},4000); toast('Arquivo baixado: '+name); }
-function baseName(pa){ return (pa.arquivo||'pauta.docx').replace(/\.docx$/i,'').replace(/-atualizada$/,''); }
+function baseName(pa){ return (pa.arquivo||'pauta.docx').replace(/\.(docx|pdf)$/i,'').replace(/-atualizada$/,''); }
 async function exportPauta(tracked){
   var pa=curPauta(); if(!pa) return; var b=$('#dl'), lab=b.querySelector('span'); b.disabled=true; lab.textContent='Gerando…';
   try{ Hist.commitAll(); await Save.flush(); var buf=await originalBytes(pa.id);
@@ -1178,6 +1292,7 @@ function renderTop(){
   S.pautas.forEach(function(x){ pick.append(h('option',{value:x.id,text:pautaLabel(x)})); });
   pick.hidden=!S.pautas.length; if(pa) pick.value=pa.id;
   $('#dl').hidden=$('#csv').hidden=$('#dst').hidden=$('#sess').hidden=!pa;
+  $('#vpdf').hidden=!(pa&&pa.fonte==='pdf');
   if(pa){
     var rel=isRelator(pa)||pa.criadoPor===S.me.uid;
     var mg=$('#m_gab'); mg.innerHTML=''; mg.append(h('option',{value:'',text:'Não identificado'})); GABS.forEach(function(g){ mg.append(h('option',{value:g.id,text:g.nome.replace(' (Convocada)','')})); });
@@ -1214,7 +1329,7 @@ $('#pick').addEventListener('change',function(e){ openPauta(e.target.value); });
 async function deletePauta(pid){
   try{
     await Save.flush(); var base=db.collection('pautas').doc(pid);
-    var subs=['processos','arquivo'];
+    var subs=['processos','arquivo','arquivoPdf'];
     for(var s=0;s<subs.length;s++){ var snap=await base.collection(subs[s]).get(); var docs=snap.docs;
       for(var j=0;j<docs.length;j+=400){ var bt=db.batch(); docs.slice(j,j+400).forEach(function(d){ bt.delete(d.ref); }); await bt.commit(); } }
     await base.delete(); toast('Pauta excluída.');
@@ -1231,8 +1346,8 @@ function renderMain(){
 function blankState(){
   return h('div',{class:'content',style:'grid-column:1/-1'},h('div',{class:'blank'},
     h('div',{class:'drop'},h('h2',{text:'Nenhuma pauta no sistema ainda'}),
-      h('p',{text:'Envie o arquivo .docx da pauta de julgamento. Cada processo vira uma ficha; os três gabinetes veem a pauta e podem registrar destaques.'}),
-      h('button',{class:'btn primary',type:'button',onclick:function(){$('#file').click();},text:'Escolher arquivo .docx'})),
+      h('p',{text:'Envie a pauta de julgamento em .docx ou PDF. Cada processo vira uma ficha; os três gabinetes veem a pauta e podem registrar destaques.'}),
+      h('button',{class:'btn primary',type:'button',onclick:function(){$('#file').click();},text:'Escolher arquivo (.docx ou PDF)'})),
     h('div',{class:'extr'},[['Processo','Número CNJ, ordem e classe'],['Partes','Polo e nome de cada parte'],['Advogados','Nome, OAB e quem representam'],['Ementa','Texto integral, parágrafo a parágrafo'],['Destaques','Por gabinete, com autor e data'],['Observações','Privadas de cada gabinete']].map(function(x){ return h('div',null,h('b',{text:x[0]}),x[1]); }))));
 }
 
@@ -1641,6 +1756,15 @@ document.addEventListener('keydown',function(e){
   if(e.altKey&&(e.key==='ArrowUp'||e.key==='ArrowDown')&&S.cur){ var ps=procsList(), i=ps.findIndex(function(p){return p.id===S.sel;}); var j=i+(e.key==='ArrowUp'?-1:1); if(ps[j]){ e.preventDefault(); select(ps[j].id); } }
 });
 $('#up').addEventListener('click',function(){ $('#file').click(); });
+$('#vpdf').addEventListener('click',async function(){
+  var pa=curPauta(); if(!pa) return; var b=this; b.disabled=true;
+  var w=window.open('','_blank');
+  try{ var blob=await pdfOriginal(pa.id), url=URL.createObjectURL(blob);
+    if(w){ w.location.href=url; } else { download(pa.arquivoPdf||'pauta.pdf',blob); }
+    setTimeout(function(){URL.revokeObjectURL(url);},60000); }
+  catch(e){ if(w) w.close(); toast(e.message||errMsg(e),true); }
+  finally{ b.disabled=false; }
+});
 $('#file').addEventListener('change',function(e){ var f=e.target.files[0]; if(f) importFile(f); e.target.value=''; });
 var dd=0;
 window.addEventListener('dragenter',function(e){ if(!S.me) return; if(Array.prototype.indexOf.call(e.dataTransfer.types||[],'Files')>=0){ e.preventDefault(); dd++; document.body.classList.add('dragging'); }});
