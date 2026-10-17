@@ -1430,10 +1430,10 @@ async function exportDestaques(modo){
     if(!retirado(p)&&(geral||ds.length)){
       var st=outros.map(function(g){ return {g:g,s:analiseDe(p.id,g.id)}; });
       if(ds.length){
-        st.filter(function(x){ return x.s!=='destacado'; }).forEach(function(x){ rows.push({texto:'',resposta:'',resultado:x.g.sigla+': '+analTxt[x.s]}); });
+        st.filter(function(x){ return x.s!=='destacado'; }).forEach(function(x){ rows.push({texto:x.g.sigla+': '+analTxt[x.s],resposta:'',resultado:''}); });
       } else {
         var txt=st.every(function(x){return x.s==='sem';})?'Sem destaque':st.every(function(x){return x.s==='pendente';})?'Não analisado':st.map(function(x){ return x.g.sigla+': '+analTxt[x.s]; }).join(' · ');
-        resultado=txt+(resultado.trim()?'\n'+resultado:'');
+        rows=[{texto:txt,resposta:'',resultado:''}];
       }
     } else if(geral&&retirado(p)&&!ds.length){ resultado=rf+(resultado.trim()?'\n'+resultado:''); }
     return {ordem:p.ordem,numero:p.numero,resultado:resultado,destaques:rows};
