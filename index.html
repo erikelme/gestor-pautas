@@ -1416,11 +1416,13 @@ $('#dl').addEventListener('click',function(e){
 });
 document.addEventListener('click',function(e){ var m=$('#dlMenu'); if(m&&!m.contains(e.target)) closeMenu(); });
 document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeMenu(); });
-async function exportDestaques(geral){
+async function exportDestaques(modo){
+  var geral=modo==='geral', naoAc=modo==='naoacolhidos';
   var pa=curPauta(); if(!pa) return; Hist.commitAll(); var rel=gabById(pa.gabinete), outros=outrosGabs(pa);
   var pre=function(t,s){ t=t||''; if(!s||/^[A-ZÀ-Ý]{1,5}\s*:/.test(t.trim())) return t; return s+': '+(t.trim()?t:'?'); };
   var analTxt={sem:'sem destaque',pendente:'não analisado'};
   var src=geral?procsAll():procsAll().filter(comDestaque);
+  if(naoAc) src=src.filter(function(p){ return destOf(p.id).some(function(d){ return d.situacao==='nao_acatado'||d.situacao==='parcial'; }); });
   var list=src.map(function(p){
     var rf=retirado(p)?retiradaFrase(p.retirada):'', ds=destOf(p.id);
     var rows=ds.map(function(d){ var g=gabById(d.gab); return {texto:pre(d.texto,g&&g.sigla),resposta:pre(d.resposta,rel&&rel.sigla),resultado:(d.resultadoDestaque||'').trim()?d.resultadoDestaque:rf}; });
@@ -1436,17 +1438,18 @@ async function exportDestaques(geral){
     } else if(geral&&retirado(p)&&!ds.length){ resultado=rf+(resultado.trim()?'\n'+resultado:''); }
     return {ordem:p.ordem,numero:p.numero,resultado:resultado,destaques:rows};
   });
-  if(!list.length){ toast(geral?'Nenhum processo nesta pauta.':'Nenhum processo com destaque nesta pauta.'); return; }
-  try{ var zip=await C.buildDestaquesDocx(Object.assign({},pa.meta,{periodo:periodo(pa.meta,true),titulo0:geral?'Destaques – geral':'Destaques'}),list); var d=(periodo(pa.meta,true)||'').replace(/\//g,'-');
-    download((geral?'Destaques geral':'Destaques')+(d?' - '+d:'')+(rel?' - Gab '+rel.num:'')+'.docx',await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'})); }
+  if(!list.length){ toast(geral?'Nenhum processo nesta pauta.':naoAc?'Nenhum destaque não acolhido ou parcialmente acolhido nesta pauta.':'Nenhum processo com destaque nesta pauta.'); return; }
+  try{ var zip=await C.buildDestaquesDocx(Object.assign({},pa.meta,{periodo:periodo(pa.meta,true),titulo0:geral?'Destaques – geral':naoAc?'Destaques não acolhidos e parcialmente acolhidos':'Destaques'}),list); var d=(periodo(pa.meta,true)||'').replace(/\//g,'-');
+    download((geral?'Destaques geral':naoAc?'Destaques nao acolhidos':'Destaques')+(d?' - '+d:'')+(rel?' - Gab '+rel.num:'')+'.docx',await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'})); }
   catch(e){ console.error(e); toast('Falha ao gerar o arquivo de destaques.',true); }
 }
 $('#dst').addEventListener('click',function(e){
   e.stopPropagation(); if($('#dlMenu')){ closeMenu(); return; }
   var r=this.getBoundingClientRect();
   var m=h('div',{class:'menu',id:'dlMenu',role:'menu'},
-    h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques(false); }},h('b',{text:'Só com destaque'}),h('span',{text:'Tabela só com os processos destacados, sem a ementa.'})),
-    h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques(true); }},h('b',{text:'Geral (todos os processos)'}),h('span',{text:'Todos os processos da pauta; sem destaque e não analisados aparecem no Resultado.'})));
+    h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques('naoacolhidos'); }},h('b',{text:'Só não acolhidos'}),h('span',{text:'Processos com destaque não acolhido ou parcialmente acolhido, com todos os destaques do processo.'})),
+    h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques('todos'); }},h('b',{text:'Todos os destacados'}),h('span',{text:'Todos os processos com destaque, sem a ementa.'})),
+    h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques('geral'); }},h('b',{text:'Geral (todos os processos)'}),h('span',{text:'Todos os processos da pauta; sem destaque e não analisados aparecem no Resultado.'})));
   m.style.top=(r.bottom+6+window.scrollY)+'px'; m.style.right=Math.max(16,document.documentElement.clientWidth-r.right)+'px';
   document.body.append(m); m.querySelector('button').focus();
 });
