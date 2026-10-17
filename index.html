@@ -1427,7 +1427,7 @@ async function exportDestaques(modo){
     var rf=retirado(p)?retiradaFrase(p.retirada):'', ds=destOf(p.id);
     var rows=ds.map(function(d){ var g=gabById(d.gab); return {texto:pre(d.texto,g&&g.sigla),resposta:pre(d.resposta,rel&&rel.sigla),resultado:(d.resultadoDestaque||'').trim()?d.resultadoDestaque:rf}; });
     var resultado=p.resultado||'';
-    if(geral&&!retirado(p)){
+    if(!retirado(p)&&(geral||ds.length)){
       var st=outros.map(function(g){ return {g:g,s:analiseDe(p.id,g.id)}; });
       if(ds.length){
         st.filter(function(x){ return x.s!=='destacado'; }).forEach(function(x){ rows.push({texto:'',resposta:'',resultado:x.g.sigla+': '+analTxt[x.s]}); });
