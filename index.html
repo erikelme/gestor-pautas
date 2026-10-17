@@ -264,7 +264,7 @@ body.dragging .drop-over{display:flex}
       <span class="save" id="save" aria-live="polite"><span class="dot"></span><span id="saveTxt">Conectando…</span></span>
       <input type="file" id="file" class="vh" accept=".docx,.pdf">
       <button class="btn" id="up" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>Enviar pauta</button>
-      <button class="btn" id="dst" type="button" hidden title="Tabela só com os processos com destaque, sem a ementa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4h11l-2 4 2 4H5"/></svg>Destaques (.docx)</button>
+      <button class="btn" id="dst" type="button" hidden title="Tabela de destaques: só os destacados ou geral, sem a ementa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4h11l-2 4 2 4H5"/></svg>Destaques (.docx)</button>
       <button class="btn" id="vpdf" type="button" hidden title="Abrir o PDF enviado"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/></svg>Ver PDF original</button>
       <button class="btn" id="csv" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10h16M4 15h16M10 4v16"/></svg>Planilha</button>
       <button class="btn primary" id="dl" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4v12M7 11l5 5 5-5M5 20h14"/></svg><span>Baixar pauta (.docx)</span></button>
@@ -730,7 +730,7 @@ async function buildDestaquesDocx(meta,processos){
       return '<w:tr><w:trPr><w:cantSplit/></w:trPr>'+a+b+cell(widths[2],cellParas(d.texto||''))+cell(widths[3],cellParas(d.resposta||''))+e+'</w:tr>';
     }).join('');
   }).join('');
-  var titulo=['Destaques',meta.tipoSessao&&meta.dataSessao?meta.tipoSessao+' de '+(meta.periodo||meta.dataSessao):'',meta.orgao||''].filter(Boolean).join(' – ');
+  var titulo=[meta.titulo0||'Destaques',meta.tipoSessao&&meta.dataSessao?meta.tipoSessao+' de '+(meta.periodo||meta.dataSessao):'',meta.orgao||''].filter(Boolean).join(' – ');
   var body='<w:p><w:pPr><w:spacing w:before="0" w:after="160"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:sz w:val="22"/></w:rPr><w:t xml:space="preserve">'+xesc(titulo)+'</w:t></w:r></w:p>'+
     '<w:tbl><w:tblPr><w:tblW w:w="'+widths.reduce(function(a,b){return a+b;},0)+'" w:type="dxa"/><w:tblLayout w:type="fixed"/>'+border+'<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>'+widths.map(function(w){return '<w:gridCol w:w="'+w+'"/>';}).join('')+'</w:tblGrid>'+head+rows+'</w:tbl><w:p/>';
   var doc='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="'+W+'" xmlns:r="'+R+'"><w:body>'+body+'<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="851" w:right="851" w:bottom="851" w:left="851" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>';
@@ -1416,17 +1416,39 @@ $('#dl').addEventListener('click',function(e){
 });
 document.addEventListener('click',function(e){ var m=$('#dlMenu'); if(m&&!m.contains(e.target)) closeMenu(); });
 document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeMenu(); });
-$('#dst').addEventListener('click',async function(){
-  var pa=curPauta(); if(!pa) return; Hist.commitAll(); var rel=gabById(pa.gabinete);
+async function exportDestaques(geral){
+  var pa=curPauta(); if(!pa) return; Hist.commitAll(); var rel=gabById(pa.gabinete), outros=outrosGabs(pa);
   var pre=function(t,s){ t=t||''; if(!s||/^[A-ZÀ-Ý]{1,5}\s*:/.test(t.trim())) return t; return s+': '+(t.trim()?t:'?'); };
-  var list=procsAll().filter(comDestaque).map(function(p){
-    var rf=retirado(p)?retiradaFrase(p.retirada):'';
-    return {ordem:p.ordem,numero:p.numero,resultado:p.resultado||'',destaques:destOf(p.id).map(function(d){ var g=gabById(d.gab); return {texto:pre(d.texto,g&&g.sigla),resposta:pre(d.resposta,rel&&rel.sigla),resultado:(d.resultadoDestaque||'').trim()?d.resultadoDestaque:rf}; })};
+  var analTxt={sem:'sem destaque',pendente:'não analisado'};
+  var src=geral?procsAll():procsAll().filter(comDestaque);
+  var list=src.map(function(p){
+    var rf=retirado(p)?retiradaFrase(p.retirada):'', ds=destOf(p.id);
+    var rows=ds.map(function(d){ var g=gabById(d.gab); return {texto:pre(d.texto,g&&g.sigla),resposta:pre(d.resposta,rel&&rel.sigla),resultado:(d.resultadoDestaque||'').trim()?d.resultadoDestaque:rf}; });
+    var resultado=p.resultado||'';
+    if(geral&&!retirado(p)){
+      var st=outros.map(function(g){ return {g:g,s:analiseDe(p.id,g.id)}; });
+      if(ds.length){
+        st.filter(function(x){ return x.s!=='destacado'; }).forEach(function(x){ rows.push({texto:'',resposta:'',resultado:x.g.sigla+': '+analTxt[x.s]}); });
+      } else {
+        var txt=st.every(function(x){return x.s==='sem';})?'Sem destaque':st.every(function(x){return x.s==='pendente';})?'Não analisado':st.map(function(x){ return x.g.sigla+': '+analTxt[x.s]; }).join(' · ');
+        resultado=txt+(resultado.trim()?'\n'+resultado:'');
+      }
+    } else if(geral&&retirado(p)&&!ds.length){ resultado=rf+(resultado.trim()?'\n'+resultado:''); }
+    return {ordem:p.ordem,numero:p.numero,resultado:resultado,destaques:rows};
   });
-  if(!list.length){ toast('Nenhum processo com destaque nesta pauta.'); return; }
-  try{ var zip=await C.buildDestaquesDocx(Object.assign({},pa.meta,{periodo:periodo(pa.meta,true)}),list); var d=(periodo(pa.meta,true)||'').replace(/\//g,'-');
-    download('Destaques'+(d?' - '+d:'')+(rel?' - Gab '+rel.num:'')+'.docx',await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'})); }
+  if(!list.length){ toast(geral?'Nenhum processo nesta pauta.':'Nenhum processo com destaque nesta pauta.'); return; }
+  try{ var zip=await C.buildDestaquesDocx(Object.assign({},pa.meta,{periodo:periodo(pa.meta,true),titulo0:geral?'Destaques – geral':'Destaques'}),list); var d=(periodo(pa.meta,true)||'').replace(/\//g,'-');
+    download((geral?'Destaques geral':'Destaques')+(d?' - '+d:'')+(rel?' - Gab '+rel.num:'')+'.docx',await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'})); }
   catch(e){ console.error(e); toast('Falha ao gerar o arquivo de destaques.',true); }
+}
+$('#dst').addEventListener('click',function(e){
+  e.stopPropagation(); if($('#dlMenu')){ closeMenu(); return; }
+  var r=this.getBoundingClientRect();
+  var m=h('div',{class:'menu',id:'dlMenu',role:'menu'},
+    h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques(false); }},h('b',{text:'Só com destaque'}),h('span',{text:'Tabela só com os processos destacados, sem a ementa.'})),
+    h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques(true); }},h('b',{text:'Geral (todos os processos)'}),h('span',{text:'Todos os processos da pauta; sem destaque e não analisados aparecem no Resultado.'})));
+  m.style.top=(r.bottom+6+window.scrollY)+'px'; m.style.right=Math.max(16,document.documentElement.clientWidth-r.right)+'px';
+  document.body.append(m); m.querySelector('button').focus();
 });
 $('#csv').addEventListener('click',function(){
   var pa=curPauta(); if(!pa) return;
