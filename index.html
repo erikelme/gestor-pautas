@@ -248,6 +248,13 @@ body.dragging .drop-over{display:flex}
 .ret-ori .rad{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:400}
 .ret-ori input{width:auto;margin:0}
 .ret-panel .lbl{font-size:12px;font-weight:600;color:var(--muted)}
+.pill.rasc{background:var(--sunk);color:var(--accent);border:1px dashed var(--accent)}
+.dcard.draft{border-left-color:var(--accent);border-left-style:dashed;background:var(--sunk)}
+.rbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:10px;padding:8px 10px;border:1px dashed var(--accent);border-radius:6px;background:var(--accent-soft);font-size:12.5px}
+.rbar[hidden]{display:none}
+.rbar b{color:var(--accent)}
+.rbar .rtxt{flex:1 1 200px;color:var(--muted)}
+.rbar .rbtns{display:flex;gap:6px}
 .setup{max-width:640px;margin:8vh auto;padding-inline:16px;line-height:1.6}
 .setup code{font-family:var(--mono);background:var(--sunk);padding:1px 5px;border-radius:4px}
 </style>
@@ -1049,7 +1056,8 @@ var Save=(function(){
     if(again||pending.size){ again=false; flush(); }
   }
   window.addEventListener('beforeunload',function(e){ if(pending.size||busy){ flush(); e.preventDefault(); e.returnValue=''; } });
-  return {queue:queue,flush:flush,ui:ui,hasPending:function(){return pending.size>0||busy;}};
+  function drop(path){ pending.delete(path); delete S.dirty[path]; }
+  return {queue:queue,flush:flush,drop:drop,ui:ui,hasPending:function(){return pending.size>0||busy;}};
 })();
 
 /* ───────── modelo ───────── */
@@ -1209,7 +1217,7 @@ function stopPautaListeners(){ S.unsub.forEach(function(u){try{u();}catch(e){}})
 function openPauta(pid){
   Save.flush(); stopPautaListeners();
   Hist.commitAll(); Hist.base={}; Hist.open={};
-  S.cur=pid; S.sel=null; S.procs={}; S.dest={}; S.obs={}; S.hist={}; S.anal={}; try{ localStorage.setItem('gp:last',pid); }catch(e){}
+  S.cur=pid; S.sel=null; S.procs={}; S.dest={}; S.obs={}; S.hist={}; S.anal={}; S.rasc={}; try{ localStorage.setItem('gp:last',pid); }catch(e){}
   var base=db.collection('pautas').doc(pid), loaded={p:false};
   render();
   S.unsub.push(base.collection('processos').onSnapshot(function(snap){
@@ -1240,6 +1248,10 @@ function openPauta(pid){
   S.unsub.push(base.collection('historico').onSnapshot(function(snap){
     snap.docChanges().forEach(function(ch){ if(ch.type==='removed') delete S.hist[ch.doc.id]; else S.hist[ch.doc.id]=ch.doc.data(); });
     if(loaded.p){ refreshHist(); refreshSide(); renderCounts(); }
+  },function(e){ console.warn(e); }));
+  S.unsub.push(base.collection('rascunhos').where('gab','==',S.me.gab).onSnapshot(function(snap){
+    snap.docChanges().forEach(function(ch){ var id=ch.doc.id; if(ch.type==='removed'){ delete S.rasc[id]; return; } if(S.dirty['pautas/'+pid+'/rascunhos/'+id]&&S.rasc[id]) return; var x=ch.doc.data(); x.id=id; S.rasc[id]=x; });
+    if(loaded.p){ refreshSide(); renderCounts(); refreshDestaques(); }
   },function(e){ console.warn(e); }));
   S.unsub.push(base.collection('observacoes').where('gab','==',S.me.gab).onSnapshot(function(snap){
     snap.docChanges().forEach(function(ch){ var x=ch.doc.data(); if(ch.type==='removed') delete S.obs[x.proc]; else if(!S.dirty['pautas/'+pid+'/observacoes/'+ch.doc.id]) S.obs[x.proc]=x; });
@@ -1501,6 +1513,9 @@ function renderCounts(){
   var gl=isRelator(pa)?outrosGabs(pa):outrosGabs(pa).filter(function(g){return g.id===S.me.gab;});
   gl.forEach(function(g){ var n=ps.filter(function(p){ return analiseDe(p.id,g.id)!=='pendente'; }).length;
     c.append(h('span',{class:'count prog'+(n===ps.length&&ps.length?' done':''),title:g.nome+': processos analisados (com ou sem destaque)'},h('b',{text:g.sigla}),' '+n+' de '+ps.length+' analisados')); });
+  var mr=Rasc.minhos();
+  if(mr.length){ var pb=h('button',{class:'btn sm primary',type:'button',title:'Publica todos os rascunhos do seu gabinete nesta pauta'},'Publicar todos os rascunhos ('+mr.length+')');
+    pb.addEventListener('click',function(){ Rasc.publicarVarios(Rasc.minhos(),pb); }); c.append(pb); }
   if(isRelator(pa)){
     var del=h('button',{class:'btn sm ghost danger',type:'button',title:'Excluir esta pauta para todos os gabinetes'},ico('trash'),'Excluir pauta'), armed=false, t;
     del.addEventListener('click',async function(){
@@ -1605,7 +1620,7 @@ function renderSide(){
     h('button',{type:'button',class:S.scope==='todas'?'on':'',onclick:async function(){S.scope='todas';await loadOthers();renderSide();$('#q').focus();},text:'Todas as pautas'}));
   side.append(h('div',{class:'search'},h('label',{class:'vh',for:'q',text:'Pesquisar processos'}),h('div',{class:'sbox'},ico('search'),inp),seg,h('div',{class:'chips',id:'chips'})),
     h('div',{class:'list',id:'list',role:'listbox','aria-label':'Processos'}),
-    isRelator()?h('div',{class:'list-foot'},h('button',{class:'btn sm',type:'button',onclick:newProc},ico('plus'),'Incluir processo na pauta')):null);
+    isRelator()?h('div',{class:'list-foot'},h('button',{class:'btn sm',type:'button',onclick:newProc},ico('plus'),'Incluir processo na pauta')):'');
   refreshSide();
 }
 function refreshSide(){
@@ -1636,6 +1651,7 @@ function renderList(){
     var p=it.p, m=it.m, other=p._pauta!==undefined, pa=other&&S.pautas.find(function(x){return x.id===p._pauta;});
     var flags=retirado(p)?h('span',{class:'flags'},h('span',{class:'pill ret',text:'Retirado de pauta',title:retiradaResumo(p.retirada)}),
       other?null:destOf(p.id).map(function(d){ var g=gabById(d.gab); return h('span',{class:'pill '+sitCls(d.situacao),text:g?g.sigla:'?',title:(g?g.nome:'')+' · '+sitLabel(d.situacao)}); })):h('span',{class:'flags'},
+      !other&&Rasc.minhos(p.id).length?h('span',{class:'pill rasc',text:'Rascunho',title:'Há rascunho do seu gabinete ainda não publicado'}):null,
       p.situacao==='elaboracao'?h('span',{class:'pill elab',text:'Em elaboração'}):p.situacao!=='ementa'?h('span',{class:'pill sem',text:'Sem ementa'}):null,
       !other&&!isRelator()&&alteradoApos(p.id,S.me.gab)?h('span',{class:'pill rev',text:'Alterado após análise',title:'O gabinete relator alterou este processo depois da análise do seu gabinete'}):(!other&&edited(p)?h('span',{class:'pill ed',text:'Alterado',title:'Difere do arquivo enviado'}):null),
       other?null:outrosGabs().filter(function(g){ return analiseDe(p.id,g.id)==='sem'&&(isRelator()||g.id===S.me.gab); }).map(function(g){ return h('span',{class:'pill semd',text:g.sigla+' ✓',title:g.nome+' · analisado, sem destaque'}); }),
@@ -1921,37 +1937,96 @@ function collapsible(card,key,p){
 function setAllCards(open){
   document.querySelectorAll('#content .card[data-card]').forEach(function(card){ var k=card.dataset.card; if(cardOpen(k)!==open) card.querySelector(':scope>header .chev').click(); });
 }
-function refreshDestaques(){
+function refreshDestaques(force){
   var card=$('#destCard'); var p=S.procs[S.sel], pa=curPauta(); if(!card||!p||!pa) return;
-  if(card.contains(document.activeElement)&&/TEXTAREA|SELECT/.test(document.activeElement.tagName)){ card.dataset.stale='1'; return; }
+  if(!force&&card.contains(document.activeElement)&&/TEXTAREA|SELECT/.test(document.activeElement.tagName)){ card.dataset.stale='1'; return; }
   drawDestaquesCard(card,p,pa);
 }
 document.addEventListener('focusout',function(e){ var card=$('#destCard'); if(card&&card.dataset.stale&&card.contains(e.target)){ setTimeout(function(){ if(!card.contains(document.activeElement)){ delete card.dataset.stale; refreshDestaques(); } },50); } });
 
+/* ═════ rascunhos: destaque (revisor) e resposta (relator) só aparecem aos outros depois de publicados ═════ */
+var Rasc={};
+Rasc.path=function(id){ return 'pautas/'+S.cur+'/rascunhos/'+id; };
+Rasc.of=function(id){ return S.rasc&&S.rasc[id]||null; };
+Rasc.minhos=function(procId){ return Object.keys(S.rasc||{}).map(function(k){return S.rasc[k];}).filter(function(r){ return r.gab===S.me.gab&&(!procId||r.proc===procId)&&!(r.ref&&(!S.dest[r.ref]||S.dest[r.ref].removido)); }); };
+Rasc.novos=function(procId){ return Rasc.minhos(procId).filter(function(r){ return r.tipo==='destaque'&&!r.ref; }).sort(function(a,b){ return String(a.criadoEm).localeCompare(String(b.criadoEm)); }); };
+Rasc.put=function(r){ r.por=S.me.uid; r.porNome=S.me.nome; r.em=now(); S.rasc[r.id]=r; var d=clone(r); delete d.id; Save.queue(Rasc.path(r.id),d,'set'); };
+Rasc.drop=async function(id){ var path=Rasc.path(id); delete S.rasc[id]; Save.drop(path); try{ await db.doc(path).delete(); }catch(e){} };
+Rasc.vazio=function(r){ if(r.tipo==='destaque') return r.ref?(r.texto||'')===(r.baseTexto||''):false;
+  return (r.situacao||'destacado')===(r.baseSituacao||'destacado')&&(r.resposta||'')===(r.baseResposta||'')&&(r.resultadoDestaque||'')===(r.baseResultado||''); };
+Rasc.publicar=async function(r){
+  var base=db.collection('pautas').doc(S.cur), t=now(), myG=gabById(S.me.gab);
+  if(r.tipo==='destaque'&&!r.ref){
+    if(!(r.texto||'').trim()) return 'vazio';
+    var mkKey=r.proc+'__'+S.me.gab; if(S.anal[mkKey]&&S.anal[mkKey].status==='sem_destaque') base.collection('analises').doc(mkKey).delete().catch(function(){});
+    var ref=await base.collection('destaques').add({proc:r.proc,numero:r.numero||'',gab:S.me.gab,texto:r.texto,resposta:'',situacao:'destacado',autor:S.me.uid,autorNome:S.me.nome,criadoEm:t,atualizadoEm:t});
+    await DestHist.write({id:ref.id,proc:r.proc,numero:r.numero,gab:S.me.gab},'inclusao','','Novo destaque do Gab '+(myG?myG.num:'')+': '+r.texto);
+  } else if(r.tipo==='destaque'){
+    var d=S.dest[r.ref]; if(!d||d.removido){ await Rasc.drop(r.id); return 'ok'; }
+    if((r.texto||'')!==(d.texto||'')){
+      await base.collection('destaques').doc(d.id).update({texto:r.texto,atualizadoEm:t,atualizadoPor:S.me.uid,atualizadoPorNome:S.me.nome});
+      await DestHist.write(d,'texto',d.texto||'',r.texto||''); }
+  } else {
+    var d2=S.dest[r.ref]; if(!d2||d2.removido){ await Rasc.drop(r.id); return 'ok'; }
+    var up={}, hs=[];
+    if((r.situacao||'destacado')!==(r.baseSituacao||'destacado')){ up.situacao=r.situacao; hs.push(['situacao',sitLabel(d2.situacao||'destacado'),sitLabel(r.situacao)]); }
+    if((r.resposta||'')!==(r.baseResposta||'')){ up.resposta=r.resposta; hs.push(['resposta',d2.resposta||'',r.resposta]); }
+    if(up.situacao!==undefined||up.resposta!==undefined){ up.respostaPor=S.me.uid; up.respostaPorNome=S.me.nome; up.respostaEm=t; }
+    if((r.resultadoDestaque||'')!==(r.baseResultado||'')){ up.resultadoDestaque=r.resultadoDestaque; up.resultadoPor=S.me.uid; up.resultadoPorNome=S.me.nome; up.resultadoEm=t; hs.push(['resultado',d2.resultadoDestaque||'',r.resultadoDestaque]); }
+    if(Object.keys(up).length){ await base.collection('destaques').doc(d2.id).update(up); for(var i=0;i<hs.length;i++) await DestHist.write(d2,hs[i][0],hs[i][1],hs[i][2]); }
+  }
+  await Rasc.drop(r.id); return 'ok';
+};
+Rasc.publicarVarios=async function(lista,btn){
+  if(btn) btn.disabled=true; var ok=0, vaz=0;
+  try{ await Save.flush();
+    for(var i=0;i<lista.length;i++){ var res=await Rasc.publicar(lista[i]); if(res==='vazio') vaz++; else ok++; }
+    toast(ok?(ok===1?'Publicado.':ok+' rascunhos publicados.')+(vaz?' '+vaz+(vaz===1?' destaque sem texto ficou em rascunho.':' destaques sem texto ficaram em rascunho.'):''):'Escreva o destaque antes de publicar.',!ok); }
+  catch(e){ toast(errMsg(e),true); }
+  finally{ if(btn) btn.disabled=false; refreshSide(); renderCounts(); refreshDestaques(true); }
+};
+
 function drawDestaquesCard(card,p,pa){
   card.innerHTML='';
   var relId=pa.gabinete, relG=gabById(relId), souRelator=S.me.gab===relId, myG=gabById(S.me.gab);
-  var wrap=h('div',{class:'dlist'}), ds=destOf(p.id);
-  if(!ds.length) wrap.append(h('div',{class:'muted',style:'font-size:13px',text:souRelator?'Nenhum destaque recebido neste processo.':'Nenhum destaque neste processo.'}));
+  var wrap=h('div',{class:'dlist'}), ds=destOf(p.id), novos=souRelator?[]:Rasc.novos(p.id);
+  if(!ds.length&&!novos.length) wrap.append(h('div',{class:'muted',style:'font-size:13px',text:souRelator?'Nenhum destaque recebido neste processo.':'Nenhum destaque neste processo.'}));
+  function barra(getR,redraw){
+    var pub=h('button',{class:'btn sm primary',type:'button',text:'Publicar'}), desc=h('button',{class:'btn sm',type:'button',text:'Descartar rascunho'});
+    var txt=h('span',{class:'rtxt'});
+    var bar=h('div',{class:'rbar'},h('b',{text:'Rascunho — não publicado'}),txt,h('span',{class:'rbtns'},desc,pub));
+    function upd(){ var r=getR(); bar.hidden=!r; if(r) txt.textContent=r.ref?' Os outros gabinetes ainda veem a versão publicada.':' Só o seu gabinete vê.'; }
+    pub.addEventListener('click',function(){ var r=getR(); if(r) Rasc.publicarVarios([r],pub); });
+    desc.addEventListener('click',async function(){ var r=getR(); if(!r) return; desc.disabled=true; await Rasc.drop(r.id); redraw(); refreshSide(); renderCounts(); });
+    upd(); return {el:bar,upd:upd};
+  }
   ds.forEach(function(d){
     var g=gabById(d.gab), meu=d.gab===S.me.gab, path='pautas/'+S.cur+'/destaques/'+d.id;
+    var rid=(souRelator?'rs_':'ed_')+d.id, r0=Rasc.of(rid);
     var cls=sitCls(d.situacao);
-    var tx=h('textarea',{rows:'3',value:d.texto||'',readonly:meu?null:true,placeholder:meu?'Teor do destaque.':''});
-    tx.addEventListener('focus',function(){ DestHist.start(d,'texto'); }); tx.addEventListener('change',function(){ DestHist.commit(d.id+'|texto'); });
-    tx.addEventListener('input',function(){ DestHist.start(d,'texto'); d.texto=tx.value; d.atualizadoEm=now(); Save.queue(path,{texto:d.texto,atualizadoEm:d.atualizadoEm,atualizadoPor:S.me.uid,atualizadoPorNome:S.me.nome},'update'); });
-    var ss=h('select',{disabled:souRelator?null:true,'aria-label':'Situação do destaque'},SIT.map(function(s){return h('option',{value:s[0],text:s[1]});})); ss.value=d.situacao||'destacado';
-    ss.addEventListener('change',function(){ var antesS=sitLabel(d.situacao||'destacado'); DestHist.write(d,'situacao',antesS,sitLabel(ss.value)); d.situacao=ss.value; d.respostaEm=now(); Save.queue(path,{situacao:d.situacao,respostaPor:S.me.uid,respostaPorNome:S.me.nome,respostaEm:d.respostaEm},'update'); refreshSide(); drawDestaquesCard(card,p,pa); });
-    var rs=h('textarea',{rows:'2',value:d.resposta||'',readonly:souRelator?null:true,placeholder:souRelator?'Resposta do Gab '+(relG?relG.num:'')+'.':'Aguardando resposta do gabinete relator.'});
-    rs.addEventListener('focus',function(){ DestHist.start(d,'resposta'); }); rs.addEventListener('change',function(){ DestHist.commit(d.id+'|resposta'); });
-    rs.addEventListener('input',function(){ DestHist.start(d,'resposta'); d.resposta=rs.value; d.respostaEm=now(); Save.queue(path,{resposta:d.resposta,situacao:d.situacao||'destacado',respostaPor:S.me.uid,respostaPorNome:S.me.nome,respostaEm:d.respostaEm},'update'); });
+    function getR(){ return Rasc.of(rid); }
+    function redraw(){ drawDestaquesCard(card,p,pa); }
+    var bar=(meu||souRelator)?barra(getR,redraw):null;
+    function touchResp(field,val){
+      var r=getR()||{id:rid,tipo:'resposta',ref:d.id,proc:p.id,numero:p.numero||'',gab:S.me.gab,baseSituacao:d.situacao||'destacado',baseResposta:d.resposta||'',baseResultado:d.resultadoDestaque||'',situacao:d.situacao||'destacado',resposta:d.resposta||'',resultadoDestaque:d.resultadoDestaque||'',criadoEm:now()};
+      r[field]=val; if(Rasc.vazio(r)){ if(getR()) Rasc.drop(rid); } else Rasc.put(r); bar.upd(); refreshSide(); renderCounts();
+    }
+    var tx=h('textarea',{rows:'3',value:meu&&r0?r0.texto||'':d.texto||'',readonly:meu?null:true,placeholder:meu?'Teor do destaque.':''});
+    tx.addEventListener('input',function(){
+      var r=getR()||{id:rid,tipo:'destaque',ref:d.id,proc:p.id,numero:p.numero||'',gab:S.me.gab,baseTexto:d.texto||'',criadoEm:now()};
+      r.texto=tx.value; if(Rasc.vazio(r)){ if(getR()) Rasc.drop(rid); } else Rasc.put(r); bar.upd(); refreshSide(); renderCounts(); });
+    var rr=souRelator?r0:null;
+    var ss=h('select',{disabled:souRelator?null:true,'aria-label':'Situação do destaque'},SIT.map(function(s){return h('option',{value:s[0],text:s[1]});})); ss.value=(rr?rr.situacao:d.situacao)||'destacado';
+    ss.addEventListener('change',function(){ touchResp('situacao',ss.value); });
+    var rs=h('textarea',{rows:'2',value:rr?rr.resposta||'':d.resposta||'',readonly:souRelator?null:true,placeholder:souRelator?'Resposta do Gab '+(relG?relG.num:'')+'.':'Aguardando resposta do gabinete relator.'});
+    rs.addEventListener('input',function(){ touchResp('resposta',rs.value); });
+    var rd=h('textarea',{rows:'2',value:rr?rr.resultadoDestaque||'':d.resultadoDestaque||'',readonly:souRelator?null:true,placeholder:souRelator?'Desfecho do destaque (ex.: processo retirado para sessão ordinária futura, por motivo de impedimento).':'Ainda não informado pelo gabinete relator.'});
+    rd.addEventListener('input',function(){ touchResp('resultadoDestaque',rd.value); });
     var del=null;
     if(meu){ var arm=false, tt; del=h('button',{class:'x',type:'button',title:'Remover destaque','aria-label':'Remover destaque'},ico('x'));
       del.addEventListener('click',async function(){
         if(!arm){ arm=true; del.style.color='var(--bad)'; del.title='Clique de novo para remover'; tt=setTimeout(function(){arm=false;del.style.color='';del.title='Remover destaque';},3000); return; }
-        clearTimeout(tt); try{ DestHist.commit(d.id+'|texto'); await Save.flush(); var t=now(); await db.doc(path).update({removido:true,removidoPor:S.me.uid,removidoPorNome:S.me.nome,removidoEm:t}); await DestHist.write(d,'remocao',d.texto||'',''); toast('Destaque removido. O registro fica no Histórico de alterações.'); }catch(e){ toast(errMsg(e),true); } }); }
-    var rd=h('textarea',{rows:'2',value:d.resultadoDestaque||'',readonly:souRelator?null:true,placeholder:souRelator?'Desfecho do destaque (ex.: processo retirado para sessão ordinária futura, por motivo de impedimento).':'Ainda não informado pelo gabinete relator.'});
-    rd.addEventListener('focus',function(){ DestHist.start(d,'resultado'); }); rd.addEventListener('change',function(){ DestHist.commit(d.id+'|resultado'); });
-    rd.addEventListener('input',function(){ DestHist.start(d,'resultado'); d.resultadoDestaque=rd.value; d.resultadoEm=now(); Save.queue(path,{resultadoDestaque:d.resultadoDestaque,resultadoPor:S.me.uid,resultadoPorNome:S.me.nome,resultadoEm:d.resultadoEm},'update'); });
+        clearTimeout(tt); try{ if(getR()) await Rasc.drop(rid); var t=now(); await db.doc(path).update({removido:true,removidoPor:S.me.uid,removidoPorNome:S.me.nome,removidoEm:t}); await DestHist.write(d,'remocao',d.texto||'',''); toast('Destaque removido. O registro fica no Histórico de alterações.'); }catch(e){ toast(errMsg(e),true); } }); }
     var ids=['t','s','r','x'].map(function(k){return 'd'+k+d.id;}); tx.id=ids[0]; ss.id=ids[1]; rs.id=ids[2]; rd.id=ids[3];
     var by=[ (d.autorNome?'Destacado por '+d.autorNome:'')+(d.criadoEm?' em '+fmtData(d.criadoEm):''),
       d.atualizadoEm&&fmtData(d.atualizadoEm)!==fmtData(d.criadoEm)?'editado em '+fmtData(d.atualizadoEm):'',
@@ -1963,18 +2038,30 @@ function drawDestaquesCard(card,p,pa){
         h('div',{class:'f',style:'flex:1 1 170px'},h('label',{for:ids[1],text:'Situação'}),ss),del),
       h('div',{class:'f'},h('label',{for:ids[0],text:'Destaque'+(g?' ('+g.sigla+')':'')}),tx),
       h('div',{class:'f'},h('label',{for:ids[2],text:'Resposta'+(relG?' ('+relG.sigla+', gabinete relator)':'')}),rs),
-      h('div',{class:'f'},h('label',{for:ids[3],text:'Resultado do destaque'}),rd)));
+      h('div',{class:'f'},h('label',{for:ids[3],text:'Resultado do destaque'}),rd),
+      bar?bar.el:null));
+  });
+  novos.forEach(function(r){
+    function getR(){ return Rasc.of(r.id); }
+    function redraw(){ drawDestaquesCard(card,p,pa); }
+    var bar=barra(getR,redraw);
+    var tx=h('textarea',{rows:'3',id:'dt'+r.id,value:r.texto||'',placeholder:'Teor do destaque.'});
+    tx.addEventListener('input',function(){ var x=getR(); if(!x) return; x.texto=tx.value; Rasc.put(x); });
+    var del=h('button',{class:'x',type:'button',title:'Descartar rascunho','aria-label':'Descartar rascunho'},ico('x'));
+    del.addEventListener('click',async function(){ await Rasc.drop(r.id); redraw(); refreshSide(); renderCounts(); });
+    wrap.append(h('div',{class:'dcard draft'},
+      h('div',{class:'dtop'},h('span',{class:'dsig',text:myG?myG.sigla:'?'}),
+        h('div',{style:'flex:2 1 220px;min-width:0'},h('div',{style:'font-weight:600',text:myG?myG.nome:''}),h('div',{class:'dby',text:'Novo destaque · criado por '+(r.porNome||S.me.nome)+' em '+fmtData(r.criadoEm)})),del),
+      h('div',{class:'f'},h('label',{for:'dt'+r.id,text:'Destaque'+(myG?' ('+myG.sigla+')':'')}),tx),bar.el));
   });
   var addBtn=null;
   if(!souRelator&&relId&&!retirado(p)){
     addBtn=h('button',{class:'btn sm add',type:'button'},ico('plus'),'Adicionar destaque do Gab '+(myG?myG.num:''));
-    addBtn.addEventListener('click',async function(){
-      addBtn.disabled=true;
-      try{ var t=now(); var mkKey=p.id+'__'+S.me.gab; if(S.anal[mkKey]&&S.anal[mkKey].status==='sem_destaque') db.collection('pautas').doc(S.cur).collection('analises').doc(mkKey).delete().catch(function(){});
-        var ref=await db.collection('pautas').doc(S.cur).collection('destaques').add({proc:p.id,numero:p.numero,gab:S.me.gab,texto:'',resposta:'',situacao:'destacado',autor:S.me.uid,autorNome:S.me.nome,criadoEm:t,atualizadoEm:t});
-        DestHist.write({id:ref.id,proc:p.id,numero:p.numero,gab:S.me.gab},'inclusao','','Novo destaque do Gab '+(myG?myG.num:''));
-        setTimeout(function(){ var el=document.getElementById('dt'+ref.id); if(el) el.focus(); },300); }
-      catch(e){ toast(errMsg(e),true); } finally{ addBtn.disabled=false; }
+    addBtn.addEventListener('click',function(){
+      var id='nv_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+      Rasc.put({id:id,tipo:'destaque',ref:'',proc:p.id,numero:p.numero||'',gab:S.me.gab,texto:'',criadoEm:now()});
+      drawDestaquesCard(card,p,pa); refreshSide(); renderCounts();
+      var el=document.getElementById('dt'+id); if(el) el.focus();
     });
   }
   var anal=null;
@@ -2000,7 +2087,8 @@ function drawDestaquesCard(card,p,pa){
         h('span',{class:'dby',text:s==='destacado'?'Para marcar “sem destaque”, remova antes os destaques do seu gabinete.':s==='sem'&&mk?'Marcado por '+mk.porNome+' em '+fmtData(mk.em)+'. Clique de novo para desfazer.':''}));
     }
   }
-  card.append(h('header',null,h('h2',{text:'Destaques'}),h('span',{class:'note',text:relG?'Pauta do Gab '+relG.num+' · '+relG.curto:'Defina o gabinete relator no topo'})),
+  var nR=Rasc.minhos(p.id).length;
+  card.append(h('header',null,h('h2',{text:'Destaques'}),h('span',{class:'note',text:(relG?'Pauta do Gab '+relG.num+' · '+relG.curto:'Defina o gabinete relator no topo')+(nR?' · '+nR+(nR===1?' rascunho não publicado':' rascunhos não publicados'):'')})),
     h('div',{class:'bd'},anal,wrap,addBtn));
   collapsible(card,'destaques',p);
 }
