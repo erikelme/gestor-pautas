@@ -255,6 +255,10 @@ body.dragging .drop-over{display:flex}
 .rbar b{color:var(--accent)}
 .rbar .rtxt{flex:1 1 200px;color:var(--muted)}
 .rbar .rbtns{display:flex;gap:6px}
+.acrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:-2px 0 10px}
+.acchip{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--ok);color:var(--ok);background:var(--ok-soft)}
+.acchip.old{border-style:dashed;color:var(--warn);border-color:var(--warn);background:var(--warn-soft)}
+.astat.acordo{border-color:var(--ok);color:var(--ok)}
 .setup{max-width:640px;margin:8vh auto;padding-inline:16px;line-height:1.6}
 .setup code{font-family:var(--mono);background:var(--sunk);padding:1px 5px;border-radius:4px}
 </style>
@@ -1076,21 +1080,29 @@ function comDestaque(p){ return destOf(p.id).length>0; }
 /* destaques numa situação: relator vê todos; os demais, só os do próprio gabinete */
 function temSit(p,sit){ var rel=isRelator(); return destOf(p.id).some(function(d){ return d.situacao===sit&&(rel||d.gab===S.me.gab); }); }
 /* análise por gabinete: pendente | sem | destacado */
-function analiseDe(procId,gab){ if(destOf(procId).some(function(d){return d.gab===gab;})) return 'destacado'; var mk=S.anal&&S.anal[procId+'__'+gab]; return mk&&mk.status!=='ciente'?'sem':'pendente'; }
+function analiseDe(procId,gab){ var ds=destOf(procId); if(ds.some(function(d){return d.gab===gab;})) return 'destacado'; var mk=S.anal&&S.anal[procId+'__'+gab]; if(mk&&mk.status!=='ciente') return 'sem';
+  return ds.some(function(d){ return !!acordoDe(d.id,'destaque',gab); })?'acordo':'pendente'; }
+/* concordâncias ("de acordo") com destaques e respostas */
+function acordoDe(destId,alvo,gab){ return S.acordo&&S.acordo[destId+'__'+alvo+'__'+gab]||null; }
+function acordosDe(destId,alvo){ return GABS.map(function(g){ return acordoDe(destId,alvo,g.id); }).filter(Boolean); }
+function temResposta(d){ return !!((d.resposta||'').trim()||(d.situacao&&d.situacao!=='destacado')||(d.resultadoDestaque||'').trim()); }
+function acordoAntigo(a,d){ var t=a.alvo==='destaque'?[d.atualizadoEm]:[d.respostaEm,d.resultadoEm]; return t.some(function(x){ return x&&String(x)>String(a.em); }); }
+function aguardaAcordo(p,gab){ var pa=curPauta(); if(!pa||pa.gabinete===gab||retirado(p)) return false;
+  return destOf(p.id).some(function(d){ return (d.gab!==gab&&analiseDe(p.id,gab)==='pendente'&&!acordoDe(d.id,'destaque',gab))||(temResposta(d)&&!acordoDe(d.id,'resposta',gab)); }); }
 /* momento da última análise do gabinete: marca "sem destaque", ciência ou destaques */
 function analiseTempo(procId,gab){
   var t=[], mk=S.anal&&S.anal[procId+'__'+gab]; if(mk&&mk.em) t.push(mk.em);
-  destOf(procId).forEach(function(d){ if(d.gab===gab){ if(d.criadoEm) t.push(d.criadoEm); if(d.atualizadoEm) t.push(d.atualizadoEm); } });
+  destOf(procId).forEach(function(d){ if(d.gab===gab){ if(d.criadoEm) t.push(d.criadoEm); if(d.atualizadoEm) t.push(d.atualizadoEm); } var a=acordoDe(d.id,'destaque',gab); if(a&&a.em) t.push(a.em); });
   return t.length?t.sort().pop():null;
 }
 /* alterações do gabinete relator feitas depois dessa análise */
 function mudancasApos(procId,gab){
   var T=analiseTempo(procId,gab); if(!T) return [];
-  return Object.keys(S.hist||{}).map(function(k){return S.hist[k];}).filter(function(e){ return e.proc===procId&&['retirada','reinclusao','exclusao'].indexOf(e.tipo)<0&&e.campo!=='retirada'&&e.campo!=='destaque'&&String(e.em)>T; });
+  return Object.keys(S.hist||{}).map(function(k){return S.hist[k];}).filter(function(e){ return e.proc===procId&&['retirada','reinclusao','exclusao'].indexOf(e.tipo)<0&&e.campo!=='retirada'&&e.campo!=='destaque'&&e.campo!=='acordo'&&String(e.em)>T; });
 }
 function alteradoApos(procId,gab){ return mudancasApos(procId,gab).length>0; }
 function outrosGabs(pa){ pa=pa||curPauta(); return GABS.filter(function(g){ return !pa||g.id!==pa.gabinete; }); }
-var ANAL_LABEL={pendente:'Pendente',sem:'Sem destaque',destacado:'Destacado'};
+var ANAL_LABEL={pendente:'Pendente',sem:'Sem destaque',destacado:'Destacado',acordo:'De acordo com o destaque'};
 function edited(p){ return p.origHash==null||C.procHash(p)!==p.origHash; }
 function isRelator(pa){ pa=pa||curPauta(); return !!(pa&&S.me&&pa.gabinete===S.me.gab); }
 function procPath(p){ return 'pautas/'+S.cur+'/processos/'+p.id; }
@@ -1177,7 +1189,7 @@ async function createProfile(user,nome,gab){
   try{ await user.updateProfile({displayName:nome}); }catch(e){}
 }
 async function onUser(user){
-  stopListeners(); S.me=null; S.pautas=[]; S.cur=null; S.procs={}; S.dest={}; S.obs={};
+  stopListeners(); S.me=null; S.pautas=[]; S.cur=null; S.procs={}; S.dest={}; S.obs={}; S.filter='todos'; S.q='';
   if(!user){ showAuth(loginView('entrar')); return; }
   try{
     var snap=await db.doc('usuarios/'+user.uid).get();
@@ -1217,7 +1229,7 @@ function stopPautaListeners(){ S.unsub.forEach(function(u){try{u();}catch(e){}})
 function openPauta(pid){
   Save.flush(); stopPautaListeners();
   Hist.commitAll(); Hist.base={}; Hist.open={};
-  S.cur=pid; S.sel=null; S.procs={}; S.dest={}; S.obs={}; S.hist={}; S.anal={}; S.rasc={}; try{ localStorage.setItem('gp:last',pid); }catch(e){}
+  S.cur=pid; S.sel=null; S.procs={}; S.dest={}; S.obs={}; S.hist={}; S.anal={}; S.rasc={}; S.acordo={}; try{ localStorage.setItem('gp:last',pid); }catch(e){}
   var base=db.collection('pautas').doc(pid), loaded={p:false};
   render();
   S.unsub.push(base.collection('processos').onSnapshot(function(snap){
@@ -1248,6 +1260,10 @@ function openPauta(pid){
   S.unsub.push(base.collection('historico').onSnapshot(function(snap){
     snap.docChanges().forEach(function(ch){ if(ch.type==='removed') delete S.hist[ch.doc.id]; else S.hist[ch.doc.id]=ch.doc.data(); });
     if(loaded.p){ refreshHist(); refreshSide(); renderCounts(); }
+  },function(e){ console.warn(e); }));
+  S.unsub.push(base.collection('acordos').onSnapshot(function(snap){
+    snap.docChanges().forEach(function(ch){ if(ch.type==='removed') delete S.acordo[ch.doc.id]; else S.acordo[ch.doc.id]=ch.doc.data(); });
+    if(loaded.p){ refreshSide(); renderCounts(); refreshDestaques(); }
   },function(e){ console.warn(e); }));
   S.unsub.push(base.collection('rascunhos').where('gab','==',S.me.gab).onSnapshot(function(snap){
     snap.docChanges().forEach(function(ch){ var id=ch.doc.id; if(ch.type==='removed'){ delete S.rasc[id]; return; } if(S.dirty['pautas/'+pid+'/rascunhos/'+id]&&S.rasc[id]) return; var x=ch.doc.data(); x.id=id; S.rasc[id]=x; });
@@ -1347,7 +1363,8 @@ DestHist.val=function(d,sub){ return (sub==='texto'?d.texto:sub==='resposta'?d.r
 DestHist.start=function(d,sub){ var k=d.id+'|'+sub; if(!DestHist.pend[k]) DestHist.pend[k]={d:d,sub:sub,antes:DestHist.val(d,sub),pid:S.cur}; };
 DestHist.commit=function(k){ var x=DestHist.pend[k]; if(!x) return; delete DestHist.pend[k]; if(x.pid!==S.cur) return; var d=S.dest[x.d.id]&&!S.dest[x.d.id].removido?S.dest[x.d.id]:x.d, cur=DestHist.val(d,x.sub); if(cur===x.antes) return; DestHist.write(d,x.sub,x.antes,cur); };
 DestHist.commitAll=function(){ Object.keys(DestHist.pend).forEach(DestHist.commit); };
-function histLabel(e){ if(e.campo==='destaque'){ var g=gabById(e.destGab); return 'Destaque '+(g?g.sigla:'')+' · '+(DestHist.labels[e.sub]||''); } return campoLabel(e.campo); }
+function histLabel(e){ if(e.campo==='acordo'){ var gd=gabById(e.destGab), ga=gabById(e.gab); return 'De acordo ('+(ga?ga.sigla:'')+') · '+(e.sub==='resposta'?'resposta ao destaque '+(gd?gd.sigla:''):'destaque '+(gd?gd.sigla:'')); }
+  if(e.campo==='destaque'){ var g=gabById(e.destGab); return 'Destaque '+(g?g.sigla:'')+' · '+(DestHist.labels[e.sub]||''); } return campoLabel(e.campo); }
 window.addEventListener('beforeunload',function(){ Hist.commitAll(); });
 function histOf(procId,campo){ return Object.keys(S.hist||{}).map(function(k){return S.hist[k];}).filter(function(e){ return e.proc===procId&&(!campo||e.campo===campo); }).sort(function(a,b){ return String(b.em).localeCompare(String(a.em)); }); }
 function diffView(a,b){
@@ -1357,8 +1374,8 @@ function diffView(a,b){
   return box;
 }
 function histEntry(e,open){
-  var g=gabById(e.gab), canRestore=isRelator()&&['retirada','reinclusao','exclusao','destaque'].indexOf(e.tipo)<0&&e.campo!=='processo'&&e.campo!=='retirada'&&S.procs[e.proc]&&!retirado(S.procs[e.proc]);
-  var acao={restauracao:'restaurou versão anterior',retirada:e.campo==='retirada'?'retirou o processo de pauta':'excluiu o processo',exclusao:'excluiu o processo',reinclusao:'reincluiu o processo na pauta'}[e.tipo]||(e.tipo==='destaque'?(e.sub==='inclusao'?'incluiu o destaque':e.sub==='remocao'?'removeu o destaque':'alterou'):'alterou');
+  var g=gabById(e.gab), canRestore=isRelator()&&['retirada','reinclusao','exclusao','destaque','acordo'].indexOf(e.tipo)<0&&e.campo!=='processo'&&e.campo!=='retirada'&&S.procs[e.proc]&&!retirado(S.procs[e.proc]);
+  var acao={restauracao:'restaurou versão anterior',retirada:e.campo==='retirada'?'retirou o processo de pauta':'excluiu o processo',exclusao:'excluiu o processo',reinclusao:'reincluiu o processo na pauta'}[e.tipo]||(e.tipo==='destaque'?(e.sub==='inclusao'?'incluiu o destaque':e.sub==='remocao'?'removeu o destaque':'alterou'):e.tipo==='acordo'?(e.depois?'registrou concordância':'desfez a concordância'):'alterou');
   var btn=null;
   if(canRestore){ btn=h('button',{class:'btn sm',type:'button',text:'Voltar ao texto anterior a esta alteração'}); btn.addEventListener('click',function(){ restoreEntry(e); }); }
   return h('details',{class:'hent',open:open?true:null},
@@ -1432,17 +1449,18 @@ async function exportDestaques(modo){
   var geral=modo==='geral', naoAc=modo==='naoacolhidos';
   var pa=curPauta(); if(!pa) return; Hist.commitAll(); var rel=gabById(pa.gabinete), outros=outrosGabs(pa);
   var pre=function(t,s){ t=t||''; if(!s||/^[A-ZÀ-Ý]{1,5}\s*:/.test(t.trim())) return t; return s+': '+(t.trim()?t:'?'); };
-  var analTxt={sem:'sem destaque',pendente:'não analisado'};
+  var analTxt={sem:'sem destaque',pendente:'não analisado',acordo:'de acordo com o destaque'};
   var src=geral?procsAll():procsAll().filter(comDestaque);
   if(naoAc) src=src.filter(function(p){ return destOf(p.id).some(function(d){ return d.situacao==='nao_acatado'||d.situacao==='parcial'; }); });
   var list=src.map(function(p){
     var rf=retirado(p)?retiradaFrase(p.retirada):'', ds=destOf(p.id);
-    var rows=ds.map(function(d){ var g=gabById(d.gab); return {texto:pre(d.texto,g&&g.sigla),resposta:pre(d.resposta,rel&&rel.sigla),resultado:(d.resultadoDestaque||'').trim()?d.resultadoDestaque:rf}; });
+    var acTxt=function(d,alvo){ var l=acordosDe(d.id,alvo).map(function(a){ var g=gabById(a.gab); return (g?g.sigla:'?')+': de acordo'; }); return l.length?'\n'+l.join('\n'):''; };
+    var rows=ds.map(function(d){ var g=gabById(d.gab); return {texto:pre(d.texto,g&&g.sigla)+acTxt(d,'destaque'),resposta:pre(d.resposta,rel&&rel.sigla)+acTxt(d,'resposta'),resultado:(d.resultadoDestaque||'').trim()?d.resultadoDestaque:rf}; });
     var resultado=p.resultado||'';
     if(!retirado(p)&&(geral||ds.length)){
       var st=outros.map(function(g){ return {g:g,s:analiseDe(p.id,g.id)}; });
       if(ds.length){
-        st.filter(function(x){ return x.s!=='destacado'; }).forEach(function(x){ rows.push({texto:x.g.sigla+': '+analTxt[x.s],resposta:'',resultado:''}); });
+        st.filter(function(x){ return x.s!=='destacado'&&x.s!=='acordo'; }).forEach(function(x){ rows.push({texto:x.g.sigla+': '+analTxt[x.s],resposta:'',resultado:''}); });
       } else {
         var txt=st.every(function(x){return x.s==='sem';})?'Sem destaque':st.every(function(x){return x.s==='pendente';})?'Não analisado':st.map(function(x){ return x.g.sigla+': '+analTxt[x.s]; }).join(' · ');
         rows=[{texto:txt,resposta:'',resultado:''}];
@@ -1601,6 +1619,7 @@ function filtered(){
     if(mine&&S.filter==='naoanal'&&analiseDe(p.id,S.me.gab)!=='pendente') return;
     if(mine&&S.filter==='semdest'&&analiseDe(p.id,S.me.gab)!=='sem') return;
     if(mine&&S.filter==='rever'&&!alteradoApos(p.id,S.me.gab)) return;
+    if(mine&&S.filter==='acordo'&&!aguardaAcordo(p,S.me.gab)) return;
     if(mine&&S.filter==='acatado'&&!temSit(p,'acatado')) return;
     if(mine&&S.filter==='parcial'&&!temSit(p,'parcial')) return;
     if(mine&&S.filter==='naoacatado'&&!temSit(p,'nao_acatado')) return;
@@ -1636,6 +1655,7 @@ function refreshSide(){
        ['acatado','Destaque acolhido',ps.filter(function(p){return temSit(p,'acatado');}).length],
        ['parcial','Destaque parcialmente acolhido',ps.filter(function(p){return temSit(p,'parcial');}).length],
        ['naoacatado','Destaque não acolhido',ps.filter(function(p){return temSit(p,'nao_acatado');}).length],
+       ['acordo','Aguardando nossa concordância',ps.filter(function(p){return aguardaAcordo(p,S.me.gab);}).length],
        ['rever','Alterados após nossa análise',ps.filter(function(p){return alteradoApos(p.id,S.me.gab);}).length],
        ['alterados','Alterados',ps.filter(edited).length]])
    .concat(procsRetirados().length||S.filter==='retirados'?[['retirados','Retirados',procsRetirados().length]]:[])
@@ -1654,7 +1674,7 @@ function renderList(){
       !other&&Rasc.minhos(p.id).length?h('span',{class:'pill rasc',text:'Rascunho',title:'Há rascunho do seu gabinete ainda não publicado'}):null,
       p.situacao==='elaboracao'?h('span',{class:'pill elab',text:'Em elaboração'}):p.situacao!=='ementa'?h('span',{class:'pill sem',text:'Sem ementa'}):null,
       !other&&!isRelator()&&alteradoApos(p.id,S.me.gab)?h('span',{class:'pill rev',text:'Alterado após análise',title:'O gabinete relator alterou este processo depois da análise do seu gabinete'}):(!other&&edited(p)?h('span',{class:'pill ed',text:'Alterado',title:'Difere do arquivo enviado'}):null),
-      other?null:outrosGabs().filter(function(g){ return analiseDe(p.id,g.id)==='sem'&&(isRelator()||g.id===S.me.gab); }).map(function(g){ return h('span',{class:'pill semd',text:g.sigla+' ✓',title:g.nome+' · analisado, sem destaque'}); }),
+      other?null:outrosGabs().filter(function(g){ var a=analiseDe(p.id,g.id); return (a==='sem'||a==='acordo')&&(isRelator()||g.id===S.me.gab); }).map(function(g){ var a=analiseDe(p.id,g.id); return h('span',{class:'pill semd',text:g.sigla+(a==='acordo'?' de acordo':' ✓'),title:g.nome+(a==='acordo'?' · de acordo com o destaque':' · analisado, sem destaque')}); }),
       other?null:destOf(p.id).map(function(d){ var g=gabById(d.gab); return h('span',{class:'pill '+sitCls(d.situacao),text:g?g.sigla:'?',title:(g?g.nome:'')+' · '+sitLabel(d.situacao)+(d.autorNome?' · '+d.autorNome:'')}); }));
     var el=h('div',{class:'li'+(p.id===S.sel&&!other?' on':''),role:'option',tabindex:'0','aria-selected':p.id===S.sel&&!other?'true':'false','data-id':p.id},
       h('span',{class:'ord',text:String(p.ordem)}),
@@ -1986,6 +2006,27 @@ Rasc.publicarVarios=async function(lista,btn){
   finally{ if(btn) btn.disabled=false; refreshSide(); renderCounts(); refreshDestaques(true); }
 };
 
+function acordoRow(d,alvo,p,pa){
+  var lst=acordosDe(d.id,alvo), mine=acordoDe(d.id,alvo,S.me.gab);
+  var pode=S.me.gab!==pa.gabinete&&!retirado(p)&&(alvo==='destaque'?d.gab!==S.me.gab:temResposta(d));
+  if(!lst.length&&!pode) return null;
+  var row=h('div',{class:'acrow'},lst.map(function(a){ var g=gabById(a.gab), old=acordoAntigo(a,d);
+    return h('span',{class:'acchip'+(old?' old':''),title:old?'Concordância dada antes da última alteração':''},'✓ '+(g?g.sigla:'?')+' de acordo · '+(a.porNome||'')+' em '+fmtData(a.em)+(old?' · antes da última alteração':'')); }));
+  if(pode){
+    var b=h('button',{class:'btn sm'+(mine?' on':''),type:'button','aria-pressed':String(!!mine)},mine?'✓ De acordo (desfazer)':(alvo==='destaque'?'De acordo com o destaque':'De acordo com a resposta'));
+    b.addEventListener('click',async function(){
+      b.disabled=true; var id=d.id+'__'+alvo+'__'+S.me.gab, ref=db.collection('pautas').doc(S.cur).collection('acordos').doc(id);
+      var e={proc:d.proc,numero:d.numero||p.numero||'',campo:'acordo',sub:alvo,acordo:id,dest:d.id,destGab:d.gab,tipo:'acordo'};
+      try{
+        if(mine){ await Hist.write(S.cur,Object.assign(e,{antes:'De acordo',depois:''})); await ref.delete(); delete S.acordo[id]; }
+        else { var a={dest:d.id,proc:d.proc,alvo:alvo,gab:S.me.gab,destGab:d.gab,por:S.me.uid,porNome:S.me.nome,em:now()}; await ref.set(a); S.acordo[id]=a; await Hist.write(S.cur,Object.assign(e,{antes:'',depois:'De acordo'})); }
+        refreshSide(); renderCounts(); refreshDestaques(true);
+      }catch(err){ toast(errMsg(err),true); b.disabled=false; }
+    });
+    row.append(b);
+  }
+  return row;
+}
 function drawDestaquesCard(card,p,pa){
   card.innerHTML='';
   var relId=pa.gabinete, relG=gabById(relId), souRelator=S.me.gab===relId, myG=gabById(S.me.gab);
@@ -2037,8 +2078,10 @@ function drawDestaquesCard(card,p,pa){
         h('div',{style:'flex:2 1 220px;min-width:0'},h('div',{style:'font-weight:600',text:g?g.nome:'Gabinete não identificado'}),h('div',{class:'dby',text:by})),
         h('div',{class:'f',style:'flex:1 1 170px'},h('label',{for:ids[1],text:'Situação'}),ss),del),
       h('div',{class:'f'},h('label',{for:ids[0],text:'Destaque'+(g?' ('+g.sigla+')':'')}),tx),
+      acordoRow(d,'destaque',p,pa),
       h('div',{class:'f'},h('label',{for:ids[2],text:'Resposta'+(relG?' ('+relG.sigla+', gabinete relator)':'')}),rs),
       h('div',{class:'f'},h('label',{for:ids[3],text:'Resultado do destaque'}),rd),
+      acordoRow(d,'resposta',p,pa),
       bar?bar.el:null));
   });
   novos.forEach(function(r){
