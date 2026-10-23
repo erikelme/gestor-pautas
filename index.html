@@ -1303,13 +1303,13 @@ async function importFile(file){
     if(isPdf){ toast('Lendo o PDF…'); var lib=await loadPdfJs(); pdfBuf=buf; buf=await C.pdfToDocx(buf,lib); }
     else if(await C.isGabDocx(buf)){ gabDoc=true; pdfBuf=buf; buf=await C.gabDocxToDocx(buf); }
     var r=await C.extract(buf);
-    var gab=gabFromText(r.meta.orgao)||S.me.gab;
+    var gabId=gabFromText(r.meta.orgao), gab=gabId||S.me.gab;
     var dup=S.pautas.find(function(x){ return x.gabinete===gab&&x.meta.dataSessao===r.meta.dataSessao&&x.meta.tipoSessao===r.meta.tipoSessao; });
     if(dup){ toast('Esta pauta já está no sistema (enviada por '+(dup.criadoPorNome||'outro usuário')+'). Abrindo a existente.'); openPauta(dup.id); return; }
     var ref=db.collection('pautas').doc();
     var b64=b64FromBuf(buf), CH=700000, n=Math.ceil(b64.length/CH);
     var pdfB64=pdfBuf?b64FromBuf(pdfBuf):'', np=pdfB64?Math.ceil(pdfB64.length/CH):0;
-    await ref.set({nome:file.name,arquivo:gabDoc?file.name:file.name.replace(/\.pdf$/i,'.docx'),fonte:isPdf?'pdf':(gabDoc?'gabdocx':'docx'),arquivoPdf:(isPdf||gabDoc)?file.name:'',partesPdf:np,meta:r.meta,metaOriginal:clone(r.meta),gabinete:gab,nProcessos:r.processos.length,partesArquivo:n,
+    await ref.set({nome:file.name,arquivo:gabDoc?file.name:file.name.replace(/\.pdf$/i,'.docx'),fonte:isPdf?'pdf':(gabDoc?'gabdocx':'docx'),arquivoPdf:(isPdf||gabDoc)?file.name:'',partesPdf:np,meta:r.meta,metaOriginal:clone(r.meta),gabinete:gab,gabAuto:!gabId,nProcessos:r.processos.length,partesArquivo:n,
       criadoPor:S.me.uid,criadoPorNome:S.me.nome,criadoEm:now(),atualizadoEm:now()});
     var writes=[];
     for(var i=0;i<n;i++) writes.push([ref.collection('arquivo').doc(String(i)),{i:i,n:n,b64:b64.slice(i*CH,(i+1)*CH)}]);
@@ -1318,7 +1318,8 @@ async function importFile(file){
     for(var j=0;j<writes.length;j+=200){ var bt=db.batch(); writes.slice(j,j+200).forEach(function(w){ bt.set(w[0],w[1]); }); await bt.commit(); }
     openPauta(ref.id);
     var g=gabById(gab);
-    toast(r.processos.length+' processos extraídos · pauta do Gab '+(g?g.num:'?')+'.'+(gab!==S.me.gab?' Só o gabinete relator edita os dados; você pode destacar.':''));
+    if(!gabId) toast(r.processos.length+' processos extraídos. O gabinete relator não foi identificado no cabeçalho: confirme-o no campo Gabinete relator (só uma vez).',true);
+    else toast(r.processos.length+' processos extraídos · pauta do Gab '+(g?g.num:'?')+'.'+(gab!==S.me.gab?' Só o gabinete relator edita os dados; você pode destacar.':''));
   }catch(e){ console.error(e); toast(e&&e.code?errMsg(e):(e&&e.message)||'Não foi possível ler o arquivo.',true); }
   finally{ btn.disabled=false; }
 }
@@ -1528,9 +1529,9 @@ function renderTop(){
   $('#vpdf').hidden=!(pa&&(pa.fonte==='pdf'||pa.fonte==='gabdocx'));
   if(pa){ $('#vpdf').lastChild.textContent=pa.fonte==='gabdocx'?'Baixar Word original':'Ver PDF original'; }
   if(pa){
-    var rel=isRelator(pa)||pa.criadoPor===S.me.uid;
+    var podeGab=pa.gabAuto===true&&pa.criadoPor===S.me.uid;
     var mg=$('#m_gab'); mg.innerHTML=''; mg.append(h('option',{value:'',text:'Não identificado'})); GABS.forEach(function(g){ mg.append(h('option',{value:g.id,text:g.nome.replace(' (Convocada)','')})); });
-    mg.value=pa.gabinete||''; mg.disabled=!rel;
+    mg.value=pa.gabinete||''; mg.disabled=!podeGab; mg.title=podeGab?'Gabinete não identificado no cabeçalho: confirme o gabinete relator. Depois de escolhido, o campo trava.':'Definido pelo cabeçalho da pauta';
     document.querySelectorAll('[data-meta]').forEach(function(i){ if(document.activeElement!==i) i.value=pa.meta[i.dataset.meta]||''; i.readOnly=!isRelator(pa); });
     var fimT=fimSessao(pa.meta); $('#m_fim').textContent=fimT&&fimT!==pa.meta.dataSessao?'a '+fimT:'';
     renderCounts();
@@ -1560,7 +1561,7 @@ document.querySelectorAll('[data-meta]').forEach(function(inp){
     savePauta(pa); });
   inp.addEventListener('change',function(){ if(inp.dataset.meta==='dataSessao'||inp.dataset.meta==='tipoSessao'){ renderTop(); if(S.sel) renderForm(); } });
 });
-$('#m_gab').addEventListener('change',function(e){ var pa=curPauta(); if(!pa) return; pa.gabinete=e.target.value; savePauta(pa); renderMain(); });
+$('#m_gab').addEventListener('change',async function(e){ var pa=curPauta(); if(!pa||!(pa.gabAuto===true&&pa.criadoPor===S.me.uid)||!e.target.value) return; pa.gabinete=e.target.value; pa.gabAuto=false; savePauta(pa); await Save.flush(); toast('Gabinete relator definido.'); renderTop(); renderMain(); });
 $('#pick').addEventListener('change',function(e){ openPauta(e.target.value); });
 async function deletePauta(pid){
   try{
@@ -1656,7 +1657,7 @@ function renderSide(){
 function refreshSide(){
   var chips=$('#chips'); if(!chips) return; chips.innerHTML=''; var fl=[];
   var ps=procsList(), rel=isRelator();
-  [['todos','Todos',ps.length],['ementa','Com ementa',ps.filter(function(p){return p.situacao==='ementa';}).length],['elaboracao','Em elaboração',ps.filter(function(p){return p.situacao==='elaboracao';}).length],
+  [['todos','Todos',ps.length],
    ['destaque',rel?'Destaques recebidos':'Com destaque',ps.filter(comDestaque).length]]
    .concat(rel?[['acatado','Destaque acolhido',ps.filter(function(p){return temSit(p,'acatado');}).length],['parcial','Destaque parcialmente acolhido',ps.filter(function(p){return temSit(p,'parcial');}).length],['naoacatado','Destaque não acolhido',ps.filter(function(p){return temSit(p,'nao_acatado');}).length]]:[])
    .concat(rel?[['aguardando','Aguardando análise',ps.filter(function(p){ return outrosGabs().some(function(g){ return analiseDe(p.id,g.id)==='pendente'; }); }).length],['alterados','Alterados',ps.filter(edited).length]]
