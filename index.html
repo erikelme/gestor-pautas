@@ -716,6 +716,8 @@ async function buildDocx(buf,meta,processos,opts){
     add((pool.spacer&&pool.spacer[0])||T.spacer.cloneNode(true));
   });
 
+  /* a pauta exportada sai sem hiperlinks (o número do processo vira texto simples) */
+  all(doc.documentElement,'hyperlink').forEach(function(h){ while(h.firstChild) h.parentNode.insertBefore(h.firstChild,h); h.parentNode.removeChild(h); });
   var out=new XMLSerializer().serializeToString(doc);
   if(!/^<\?xml/.test(out)) out='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'+out;
   P.zip.file('word/document.xml',out);
@@ -1730,11 +1732,10 @@ function renderForm(){
   var h1El=h('h1',{id:'h1num',text:p.numero||'Novo processo'});
   var copyBtn=h('button',{class:'btn sm',type:'button',title:'Copiar número',onclick:function(){ var n=p.numero;
     (navigator.clipboard?navigator.clipboard.writeText(n):Promise.reject()).then(function(){toast('Número copiado: '+n);},function(){ var r=document.createRange(); r.selectNodeContents(h1El); var s=getSelection(); s.removeAllRanges(); s.addRange(r); toast('Use Ctrl+C para copiar o número selecionado.'); }); }},ico('copy'),'Copiar nº');
-  var linkA=p.link&&/^https?:\/\//.test(p.link)?h('a',{class:'btn sm',href:p.link,target:'_blank',rel:'noopener'},ico('link'),'Abrir no sistema'):null;
   var nav=h('span',{style:'display:inline-flex;gap:4px'},
     h('button',{class:'btn sm',type:'button',title:'Processo anterior (Alt+↑)',disabled:idx<=0?true:null,onclick:function(){ if(idx>0) select(ps[idx-1].id); }},ico('up')),
     h('button',{class:'btn sm',type:'button',title:'Próximo processo (Alt+↓)',disabled:idx>=ps.length-1?true:null,onclick:function(){ if(idx<ps.length-1) select(ps[idx+1].id); }},ico('down')));
-  var head=h('div',{class:'phead'},h('div',{style:'min-width:0'},h1El,h('div',{class:'sub',text:'Chamada '+p.ordem+' · '+(p.classe||'Classe não informada')+' · '+(pa.meta.tipoSessao||'')+' de '+(periodo(pa.meta,true)||'')})),h('div',{class:'acts'},h('button',{class:'btn sm',type:'button',title:'Recolher todos os cards',onclick:function(){setAllCards(false);}},'Recolher tudo'),h('button',{class:'btn sm',type:'button',title:'Abrir todos os cards',onclick:function(){setAllCards(true);}},'Expandir tudo'),copyBtn,linkA,nav));
+  var head=h('div',{class:'phead'},h('div',{style:'min-width:0'},h1El,h('div',{class:'sub',text:'Chamada '+p.ordem+' · '+(p.classe||'Classe não informada')+' · '+(pa.meta.tipoSessao||'')+' de '+(periodo(pa.meta,true)||'')})),h('div',{class:'acts'},h('button',{class:'btn sm',type:'button',title:'Recolher todos os cards',onclick:function(){setAllCards(false);}},'Recolher tudo'),h('button',{class:'btn sm',type:'button',title:'Abrir todos os cards',onclick:function(){setAllCards(true);}},'Expandir tudo'),copyBtn,nav));
   var edNote=edited(p)?h('div',{class:'ed-banner'},h('b',{text:p.origHash?'Alterado depois do envio da pauta':'Processo incluído depois do envio da pauta'}),
       h('span',{text:(p.atualizadoPor?' · última edição: '+p.atualizadoPor+' em '+fmtData(p.atualizadoEm):'')+(p.origHash?'. Use “Comparar com o original”, na ementa, ou o Histórico de alterações para ver o que mudou.':'.')})):null;
   var retNote=null;
@@ -1777,12 +1778,10 @@ function renderForm(){
   var sit=h('select',{disabled:ro?true:null},[['ementa','Ementa disponível'],['elaboracao','Documentos em elaboração'],['sem','Sem ementa']].map(function(o){ return h('option',{value:o[0],text:o[1]}); }));
   sit.value=p.situacao||'sem'; sit.addEventListener('change',function(){ p.situacao=sit.value; changed(p); renderForm(); });
   var ordIn=txt('ordem',{type:'number',min:'1',class:'mono-in'});
-  var linkIn=txt('link',{type:'url',placeholder:'https://',class:'mono-in'}); linkIn.addEventListener('change',renderForm);
   var dados=h('div',{class:'card'},h('header',null,h('h2',{text:'Dados do processo'})),h('div',{class:'bd grid'},
     field('Número do processo',numIn,'c3',cnjHint),field('Chamada',ordIn,'c1'),field('Situação na pauta',sit,'c2'),
     field('Classe processual',clsIn,'c4'),field('Código da classe',codIn,'c2',h('span',{class:'hint',text:'Tabela Processual Unificada do CNJ'})),
-    field('Relator(a)',h('input',{value:relG?relG.nome:(pa.meta.relator||''),readonly:true}),'c3'),
-    field('Link do processo',linkIn,'c3',h('span',{class:'hint',text:'Vai como hiperlink no título do processo'}))));
+    field('Relator(a)',h('input',{value:relG?relG.nome:(pa.meta.relator||''),readonly:true}),'c3')));
   cnj(numIn);
 
   /* partes */
