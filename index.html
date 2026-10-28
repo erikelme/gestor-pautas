@@ -259,6 +259,7 @@ body.dragging .drop-over{display:flex}
 .acchip{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--ok);color:var(--ok);background:var(--ok-soft)}
 .acchip.old{border-style:dashed;color:var(--warn);border-color:var(--warn);background:var(--warn-soft)}
 .astat.acordo{border-color:var(--ok);color:var(--ok)}
+.astat.encerrado{border-color:var(--line);color:var(--ink);background:var(--sunk)}
 .chips{display:block}
 .ftog{display:flex;align-items:center;gap:6px;width:100%;border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:6px 10px;font-size:13px;cursor:pointer;text-align:left;color:var(--ink)}
 .ftog .flbl{color:var(--muted);font-size:12px}
@@ -1097,7 +1098,8 @@ function comDestaque(p){ return destOf(p.id).length>0; }
 function temSit(p,sit){ var rel=isRelator(); return destOf(p.id).some(function(d){ return d.situacao===sit&&(rel||d.gab===S.me.gab); }); }
 /* análise por gabinete: pendente | sem | destacado */
 function analiseDe(procId,gab){ var ds=destOf(procId); if(ds.some(function(d){return d.gab===gab;})) return 'destacado'; var mk=S.anal&&S.anal[procId+'__'+gab]; if(mk&&mk.status!=='ciente') return 'sem';
-  return ds.some(function(d){ return !!acordoDe(d.id,'destaque',gab)||(d.gab!==gab&&!!acordoDe(d.id,'resposta',gab)); })?'acordo':'pendente'; }
+  if(ds.some(function(d){ return !!acordoDe(d.id,'destaque',gab)||(d.gab!==gab&&!!acordoDe(d.id,'resposta',gab)); })) return 'acordo';
+  return ds.some(function(d){ return d.gab!==gab&&d.situacao==='nao_acatado'; })?'encerrado':'pendente'; }
 /* concordâncias ("de acordo") com destaques e respostas */
 function acordoDe(destId,alvo,gab){ return S.acordo&&S.acordo[destId+'__'+alvo+'__'+gab]||null; }
 function acordosDe(destId,alvo){ return GABS.map(function(g){ return acordoDe(destId,alvo,g.id); }).filter(Boolean); }
@@ -1105,6 +1107,7 @@ function temResposta(d){ return !!((d.resposta||'').trim()||(d.situacao&&d.situa
 function acordoAntigo(a,d){ var t=a.alvo==='destaque'?[d.atualizadoEm]:[d.respostaEm,d.resultadoEm]; return t.some(function(x){ return x&&String(x)>String(a.em); }); }
 function aguardaAcordo(p,gab){ var pa=curPauta(); if(!pa||pa.gabinete===gab||retirado(p)) return false;
   return destOf(p.id).some(function(d){ var aD=acordoDe(d.id,'destaque',gab), aR=acordoDe(d.id,'resposta',gab);
+    if(d.situacao==='nao_acatado') return false;   // destaque não acolhido: discussão encerrada
     if(d.gab===gab) return temResposta(d)&&!aR;
     if(aD||aR) return false;
     return analiseDe(p.id,gab)==='pendente'||temResposta(d); }); }
@@ -1123,7 +1126,7 @@ function alteradoApos(procId,gab){ return mudancasApos(procId,gab).length>0; }
 function outrosGabs(pa){ pa=pa||curPauta(); return GABS.filter(function(g){ return !pa||g.id!==pa.gabinete; }); }
 function acordoTipo(procId,gab){ var ds=destOf(procId); if(ds.some(function(d){ return !!acordoDe(d.id,'destaque',gab); })) return 'destaque'; if(ds.some(function(d){ return d.gab!==gab&&!!acordoDe(d.id,'resposta',gab); })) return 'resposta'; return null; }
 function analLabel(procId,gab){ var s=analiseDe(procId,gab); if(s==='acordo') return acordoTipo(procId,gab)==='resposta'?'De acordo com a resposta':'De acordo com o destaque'; return ANAL_LABEL[s]; }
-var ANAL_LABEL={pendente:'Pendente',sem:'Sem destaque',destacado:'Destacado',acordo:'De acordo'};
+var ANAL_LABEL={pendente:'Pendente',sem:'Sem destaque',destacado:'Destacado',acordo:'De acordo',encerrado:'Encerrado pelo relator'};
 function edited(p){ return p.origHash==null||C.procHash(p)!==p.origHash; }
 function isRelator(pa){ pa=pa||curPauta(); return !!(pa&&S.me&&pa.gabinete===S.me.gab); }
 function procPath(p){ return 'pautas/'+S.cur+'/processos/'+p.id; }
@@ -1471,7 +1474,7 @@ async function exportDestaques(modo){
   var geral=modo==='geral', naoAc=modo==='naoacolhidos';
   var pa=curPauta(); if(!pa) return; Hist.commitAll(); var rel=gabById(pa.gabinete), outros=outrosGabs(pa);
   var pre=function(t,s){ t=t||''; if(!s||/^[A-ZÀ-Ý]{1,5}\s*:/.test(t.trim())) return t; return s+': '+(t.trim()?t:'?'); };
-  var analTxt={sem:'sem destaque',pendente:'não analisado',acordo:'de acordo'};
+  var analTxt={sem:'sem destaque',pendente:'não analisado',acordo:'de acordo',encerrado:'encerrado pelo relator'};
   var src=geral?procsAll():procsAll().filter(comDestaque);
   if(naoAc) src=src.filter(function(p){ return destOf(p.id).some(function(d){ return d.situacao==='nao_acatado'||d.situacao==='parcial'; }); });
   var list=src.map(function(p){
