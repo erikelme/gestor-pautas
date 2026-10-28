@@ -1107,16 +1107,19 @@ function temResposta(d){ return !!((d.resposta||'').trim()||(d.situacao&&d.situa
 function acordoAntigo(a,d){ var t=a.alvo==='destaque'?[d.atualizadoEm]:[d.respostaEm,d.resultadoEm]; return t.some(function(x){ return x&&String(x)>String(a.em); }); }
 /* destaques do outro revisor publicados depois do "sem destaque" do gabinete, ainda sem manifestação */
 function novosApos(procId,gab){ var mk=S.anal&&S.anal[procId+'__'+gab]; if(!mk||mk.status!=='sem_destaque'||!mk.em) return [];
-  return destOf(procId).filter(function(d){ return d.gab!==gab&&d.situacao!=='nao_acatado'&&String(d.criadoEm||'')>String(mk.em)&&!acordoDe(d.id,'destaque',gab)&&!acordoDe(d.id,'resposta',gab); }); }
+  var base=[mk.em,mk.cienteNovoEm||''].sort().pop();
+  return destOf(procId).filter(function(d){ return d.gab!==gab&&d.situacao!=='nao_acatado'&&String(d.criadoEm||'')>String(base)&&!acordoDe(d.id,'destaque',gab)&&!acordoDe(d.id,'resposta',gab); }); }
 function aguardaAcordo(p,gab){ var pa=curPauta(); if(!pa||pa.gabinete===gab||retirado(p)) return false;
   return destOf(p.id).some(function(d){ var aD=acordoDe(d.id,'destaque',gab), aR=acordoDe(d.id,'resposta',gab);
     if(d.situacao==='nao_acatado') return false;   // destaque não acolhido: discussão encerrada
-    if(d.gab===gab) return temResposta(d)&&!aR;
+    var mk=S.anal&&S.anal[p.id+'__'+gab], tr=[d.respostaEm||'',d.resultadoEm||''].sort().pop();
+    var respPend=temResposta(d)&&!(mk&&mk.cienteAltEm&&String(mk.cienteAltEm)>=String(tr));   // "Ciente: revisei a alteração" encerra a espera pela resposta
+    if(d.gab===gab) return respPend&&!aR;
     if(aD||aR) return false;
-    return analiseDe(p.id,gab)==='pendente'||temResposta(d)||novosApos(p.id,gab).indexOf(d)>=0; }); }
+    return analiseDe(p.id,gab)==='pendente'||respPend||novosApos(p.id,gab).indexOf(d)>=0; }); }
 /* momento da última análise do gabinete: marca "sem destaque", ciência ou destaques */
 function analiseTempo(procId,gab){
-  var t=[], mk=S.anal&&S.anal[procId+'__'+gab]; if(mk&&mk.em) t.push(mk.em);
+  var t=[], mk=S.anal&&S.anal[procId+'__'+gab]; if(mk&&mk.em) t.push(mk.em); if(mk&&mk.cienteAltEm) t.push(mk.cienteAltEm);
   destOf(procId).forEach(function(d){ if(d.gab===gab){ if(d.criadoEm) t.push(d.criadoEm); if(d.atualizadoEm) t.push(d.atualizadoEm); } var a=acordoDe(d.id,'destaque',gab); if(a&&a.em) t.push(a.em); var ar=d.gab!==gab&&acordoDe(d.id,'resposta',gab); if(ar&&ar.em) t.push(ar.em); });
   return t.length?t.sort().pop():null;
 }
@@ -1769,7 +1772,7 @@ function renderForm(){
     var ciente=h('button',{class:'btn sm',type:'button',text:'Ciente: revisei a alteração'});
     ciente.addEventListener('click',async function(){
       ciente.disabled=true; var key=p.id+'__'+S.me.gab, mk=S.anal[key];
-      try{ await db.collection('pautas').doc(S.cur).collection('analises').doc(key).set({proc:p.id,gab:S.me.gab,status:mk&&mk.status==='sem_destaque'?'sem_destaque':'ciente',por:S.me.uid,porNome:S.me.nome,em:now()}); toast('Registrado: alteração revisada.'); if(revNote) revNote.remove(); }
+      try{ var nm=Object.assign({},mk||{status:'ciente',em:'',porNome:S.me.nome},{proc:p.id,gab:S.me.gab,por:S.me.uid,cienteAltEm:now(),cienteAltPorNome:S.me.nome}); delete nm.id; await db.collection('pautas').doc(S.cur).collection('analises').doc(key).set(nm); S.anal[key]=nm; toast('Registrado: alteração revisada.'); refreshSide(); renderCounts(); renderForm(); }
       catch(e){ toast(errMsg(e),true); ciente.disabled=false; }
     });
     revNote=h('div',{class:'rev-banner'},h('div',null,h('b',{text:'Alterado depois da análise do Gab '+(myG?myG.num:'')}),
@@ -1784,7 +1787,7 @@ function renderForm(){
         await Hist.write(S.cur,{proc:p.id,numero:p.numero||'',campo:'acordo',sub:'destaque',acordo:id,dest:nd.id,destGab:nd.gab,tipo:'acordo',antes:'',depois:'De acordo'}); refreshSide(); renderCounts(); renderForm(); }
       catch(e){ toast(errMsg(e),true); bAc.disabled=false; } });
     bCi.addEventListener('click',async function(){ bCi.disabled=true; var key=p.id+'__'+S.me.gab;
-      try{ var mk={proc:p.id,gab:S.me.gab,status:'sem_destaque',por:S.me.uid,porNome:S.me.nome,em:now()}; await db.collection('pautas').doc(S.cur).collection('analises').doc(key).set(mk); S.anal[key]=mk; toast('Registrado: ciente do novo destaque.'); refreshSide(); renderCounts(); renderForm(); }
+      try{ var mk=Object.assign({},S.anal[key]||{},{proc:p.id,gab:S.me.gab,status:'sem_destaque',por:S.me.uid,cienteNovoEm:now(),cienteNovoPorNome:S.me.nome}); delete mk.id; if(!mk.em) mk.em=mk.cienteNovoEm; await db.collection('pautas').doc(S.cur).collection('analises').doc(key).set(mk); S.anal[key]=mk; toast('Registrado: ciente do novo destaque.'); refreshSide(); renderCounts(); renderForm(); }
       catch(e){ toast(errMsg(e),true); bCi.disabled=false; } });
     novoNote=h('div',{class:'rev-banner'},h('div',null,h('b',{text:'Novo destaque após a sua análise'}),
       h('span',{text:' · O '+(ngab?ngab.sigla+' (Gab '+ngab.num+')':'outro gabinete')+' publicou '+(novos.length>1?novos.length+' destaques':'um destaque')+' depois do “sem destaque” do seu gabinete'+(nd.autorNome?' · por '+nd.autorNome:'')+' em '+fmtData(nd.criadoEm)+'. Concorde com o destaque ou registre ciência para manter o “sem destaque”.'})),
