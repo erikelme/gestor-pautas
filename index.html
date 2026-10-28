@@ -1097,20 +1097,23 @@ function comDestaque(p){ return destOf(p.id).length>0; }
 /* destaques numa situação: relator vê todos; os demais, só os do próprio gabinete */
 function temSit(p,sit){ var rel=isRelator(); return destOf(p.id).some(function(d){ return d.situacao===sit&&(rel||d.gab===S.me.gab); }); }
 /* análise por gabinete: pendente | sem | destacado */
-function analiseDe(procId,gab){ var ds=destOf(procId); if(ds.some(function(d){return d.gab===gab;})) return 'destacado'; var mk=S.anal&&S.anal[procId+'__'+gab]; if(mk&&mk.status!=='ciente') return 'sem';
-  if(ds.some(function(d){ return !!acordoDe(d.id,'destaque',gab)||(d.gab!==gab&&!!acordoDe(d.id,'resposta',gab)); })) return 'acordo';
+function analiseDe(procId,gab){ var ds=destOf(procId); if(ds.some(function(d){return d.gab===gab;})) return 'destacado'; if(ds.some(function(d){ return !!acordoDe(d.id,'destaque',gab)||(d.gab!==gab&&!!acordoDe(d.id,'resposta',gab)); })) return 'acordo';
+  var mk=S.anal&&S.anal[procId+'__'+gab]; if(mk&&mk.status!=='ciente') return 'sem';
   return ds.some(function(d){ return d.gab!==gab&&d.situacao==='nao_acatado'; })?'encerrado':'pendente'; }
 /* concordâncias ("de acordo") com destaques e respostas */
 function acordoDe(destId,alvo,gab){ return S.acordo&&S.acordo[destId+'__'+alvo+'__'+gab]||null; }
 function acordosDe(destId,alvo){ return GABS.map(function(g){ return acordoDe(destId,alvo,g.id); }).filter(Boolean); }
 function temResposta(d){ return !!((d.resposta||'').trim()||(d.situacao&&d.situacao!=='destacado')||(d.resultadoDestaque||'').trim()); }
 function acordoAntigo(a,d){ var t=a.alvo==='destaque'?[d.atualizadoEm]:[d.respostaEm,d.resultadoEm]; return t.some(function(x){ return x&&String(x)>String(a.em); }); }
+/* destaques do outro revisor publicados depois do "sem destaque" do gabinete, ainda sem manifestação */
+function novosApos(procId,gab){ var mk=S.anal&&S.anal[procId+'__'+gab]; if(!mk||mk.status!=='sem_destaque'||!mk.em) return [];
+  return destOf(procId).filter(function(d){ return d.gab!==gab&&d.situacao!=='nao_acatado'&&String(d.criadoEm||'')>String(mk.em)&&!acordoDe(d.id,'destaque',gab)&&!acordoDe(d.id,'resposta',gab); }); }
 function aguardaAcordo(p,gab){ var pa=curPauta(); if(!pa||pa.gabinete===gab||retirado(p)) return false;
   return destOf(p.id).some(function(d){ var aD=acordoDe(d.id,'destaque',gab), aR=acordoDe(d.id,'resposta',gab);
     if(d.situacao==='nao_acatado') return false;   // destaque não acolhido: discussão encerrada
     if(d.gab===gab) return temResposta(d)&&!aR;
     if(aD||aR) return false;
-    return analiseDe(p.id,gab)==='pendente'||temResposta(d); }); }
+    return analiseDe(p.id,gab)==='pendente'||temResposta(d)||novosApos(p.id,gab).indexOf(d)>=0; }); }
 /* momento da última análise do gabinete: marca "sem destaque", ciência ou destaques */
 function analiseTempo(procId,gab){
   var t=[], mk=S.anal&&S.anal[procId+'__'+gab]; if(mk&&mk.em) t.push(mk.em);
@@ -1698,6 +1701,7 @@ function renderList(){
       other?null:destOf(p.id).map(function(d){ var g=gabById(d.gab); return h('span',{class:'pill '+sitCls(d.situacao),text:g?g.sigla:'?',title:(g?g.nome:'')+' · '+sitLabel(d.situacao)}); })):h('span',{class:'flags'},
       !other&&Rasc.minhos(p.id).length?h('span',{class:'pill rasc',text:'Rascunho',title:'Há rascunho do seu gabinete ainda não publicado'}):null,
       p.situacao==='elaboracao'?h('span',{class:'pill elab',text:'Em elaboração'}):p.situacao!=='ementa'?h('span',{class:'pill sem',text:'Sem ementa'}):null,
+      !other&&!isRelator()&&!retirado(p)&&novosApos(p.id,S.me.gab).length?h('span',{class:'pill rev',text:'Novo destaque após nossa análise',title:'O outro gabinete publicou um destaque depois da sua marcação "sem destaque"'}):null,
       !other&&!isRelator()&&alteradoApos(p.id,S.me.gab)?h('span',{class:'pill rev',text:'Alterado após análise',title:'O gabinete relator alterou este processo depois da análise do seu gabinete'}):(!other&&edited(p)?h('span',{class:'pill ed',text:'Alterado',title:'Difere do arquivo enviado'}):null),
       other?null:outrosGabs().filter(function(g){ var a=analiseDe(p.id,g.id); return (a==='sem'||a==='acordo')&&(isRelator()||g.id===S.me.gab); }).map(function(g){ var a=analiseDe(p.id,g.id); var at=a==='acordo'&&acordoTipo(p.id,g.id); return h('span',{class:'pill semd',text:g.sigla+(a==='acordo'?(at==='resposta'?' de acordo c/ resposta':' de acordo c/ destaque'):' ✓'),title:g.nome+(a==='acordo'?(at==='resposta'?' · de acordo com a resposta':' · de acordo com o destaque'):' · analisado, sem destaque')}); }),
       other?null:destOf(p.id).map(function(d){ var g=gabById(d.gab); return h('span',{class:'pill '+sitCls(d.situacao),text:g?g.sigla:'?',title:(g?g.nome:'')+' · '+sitLabel(d.situacao)+(d.autorNome?' · '+d.autorNome:'')}); }));
@@ -1770,6 +1774,21 @@ function renderForm(){
     });
     revNote=h('div',{class:'rev-banner'},h('div',null,h('b',{text:'Alterado depois da análise do Gab '+(myG?myG.num:'')}),
       h('span',{text:' · '+campos.join(', ')+(ult?' · por '+(ult.porNome||'?')+' em '+fmtData(ult.em):'')+'. Confira no Histórico de alterações e, se mantiver a análise, registre a ciência.'})),ciente);
+  }
+  var novoNote=null, novos=(!souRel&&!ret)?novosApos(p.id,S.me.gab):[];
+  if(novos.length){
+    var nd=novos[0], ngab=gabById(nd.gab);
+    var bAc=h('button',{class:'btn sm',type:'button',text:'De acordo com o destaque'}), bCi=h('button',{class:'btn sm',type:'button',text:'Ciente'});
+    bAc.addEventListener('click',async function(){ bAc.disabled=true; var id=nd.id+'__destaque__'+S.me.gab;
+      try{ var a={dest:nd.id,proc:p.id,alvo:'destaque',gab:S.me.gab,destGab:nd.gab,por:S.me.uid,porNome:S.me.nome,em:now()}; await db.collection('pautas').doc(S.cur).collection('acordos').doc(id).set(a); S.acordo[id]=a;
+        await Hist.write(S.cur,{proc:p.id,numero:p.numero||'',campo:'acordo',sub:'destaque',acordo:id,dest:nd.id,destGab:nd.gab,tipo:'acordo',antes:'',depois:'De acordo'}); refreshSide(); renderCounts(); renderForm(); }
+      catch(e){ toast(errMsg(e),true); bAc.disabled=false; } });
+    bCi.addEventListener('click',async function(){ bCi.disabled=true; var key=p.id+'__'+S.me.gab;
+      try{ var mk={proc:p.id,gab:S.me.gab,status:'sem_destaque',por:S.me.uid,porNome:S.me.nome,em:now()}; await db.collection('pautas').doc(S.cur).collection('analises').doc(key).set(mk); S.anal[key]=mk; toast('Registrado: ciente do novo destaque.'); refreshSide(); renderCounts(); renderForm(); }
+      catch(e){ toast(errMsg(e),true); bCi.disabled=false; } });
+    novoNote=h('div',{class:'rev-banner'},h('div',null,h('b',{text:'Novo destaque após a sua análise'}),
+      h('span',{text:' · O '+(ngab?ngab.sigla+' (Gab '+ngab.num+')':'outro gabinete')+' publicou '+(novos.length>1?novos.length+' destaques':'um destaque')+' depois do “sem destaque” do seu gabinete'+(nd.autorNome?' · por '+nd.autorNome:'')+' em '+fmtData(nd.criadoEm)+'. Concorde com o destaque ou registre ciência para manter o “sem destaque”.'})),
+      h('span',{style:'display:flex;gap:6px;flex-wrap:wrap'},bAc,bCi));
   }
   var banner=ro&&!ret?h('div',{class:'ro-banner',text:'Pauta do '+(relG?'Gab '+relG.num+' · '+relG.curto:'gabinete relator')+'. Os dados do processo são editados só pelo gabinete relator; você pode registrar destaques e suas observações privadas.'}):null;
 
@@ -1895,7 +1914,7 @@ function renderForm(){
   var grid0=dados.querySelector(':scope>.bd'); grid0.classList.remove('bd');
   dados.append(h('div',{class:'bd'},grid0,sub(partes,'Partes'),sub(advs,'Advogados'),sub(outros,'Outras informações')));
   collapsible(dados,'dados',p); collapsible(ementa,'ementa',p); collapsible(ctrl,'resultado',p);
-  c.append(h('div',{class:'wrap'},head,retNote,revNote,edNote,banner,dados,ementa,destCard,ctrl,histCard,foot));
+  c.append(h('div',{class:'wrap'},head,retNote,novoNote,revNote,edNote,banner,dados,ementa,destCard,ctrl,histCard,foot));
   requestAnimationFrame(function(){ autoGrow(ta); });
 }
 
