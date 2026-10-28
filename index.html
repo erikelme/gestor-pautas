@@ -257,6 +257,7 @@ body.dragging .drop-over{display:flex}
 .rbar .rbtns{display:flex;gap:6px}
 .acrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:-2px 0 10px}
 .acchip{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--ok);color:var(--ok);background:var(--ok-soft)}
+.acchip.mant{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
 .acchip.old{border-style:dashed;color:var(--warn);border-color:var(--warn);background:var(--warn-soft)}
 .astat.acordo{border-color:var(--ok);color:var(--ok)}
 .astat.encerrado{border-color:var(--line);color:var(--ink);background:var(--sunk)}
@@ -1117,12 +1118,14 @@ function acordoAntigo(a,d){ var t=a.alvo==='destaque'?[d.atualizadoEm]:[d.respos
 function novosApos(procId,gab){ var mk=S.anal&&S.anal[procId+'__'+gab]; if(!mk||mk.status!=='sem_destaque'||!mk.em) return [];
   var base=[mk.em,mk.cienteNovoEm||''].sort().pop();
   return destOf(procId).filter(function(d){ return d.gab!==gab&&d.situacao!=='nao_acatado'&&String(d.criadoEm||'')>String(base)&&!acordoDe(d.id,'destaque',gab)&&!acordoDe(d.id,'resposta',gab); }); }
+function aguardaPosicao(p){ return !retirado(p)&&destOf(p.id).some(function(d){ return temResposta(d)&&!acordoDe(d.id,'resposta',d.gab)&&!d.mantido; }); }
+function temMantido(p){ return destOf(p.id).some(function(d){ return !!d.mantido; }); }
 function aguardaAcordo(p,gab){ var pa=curPauta(); if(!pa||pa.gabinete===gab||retirado(p)) return false;
   return destOf(p.id).some(function(d){ var aD=acordoDe(d.id,'destaque',gab), aR=acordoDe(d.id,'resposta',gab);
-    if(d.situacao==='nao_acatado') return false;   // destaque não acolhido: discussão encerrada
     var mk=S.anal&&S.anal[p.id+'__'+gab], tr=[d.respostaEm||'',d.resultadoEm||''].sort().pop();
     var respPend=temResposta(d)&&!(mk&&mk.cienteAltEm&&String(mk.cienteAltEm)>=String(tr));   // "Ciente: revisei a alteração" encerra a espera pela resposta
-    if(d.gab===gab) return respPend&&!aR;
+    if(d.gab===gab) return respPend&&!aR&&!d.mantido;   // o destacante sempre se posiciona: de acordo, mantém ou retira
+    if(d.situacao==='nao_acatado') return false;   // destaque não acolhido: discussão encerrada para o outro revisor
     if(aD||aR) return false;
     return analiseDe(p.id,gab)==='pendente'||respPend||novosApos(p.id,gab).indexOf(d)>=0; }); }
 /* momento da última análise do gabinete: marca "sem destaque", ciência ou destaques */
@@ -1396,7 +1399,7 @@ Hist.commit=function(id){
 };
 Hist.commitAll=function(){ Object.keys(Hist.open).forEach(function(id){ if(Hist.open[id]) Hist.commit(id); }); DestHist.commitAll(); };
 /* histórico dos destaques: inclusão, remoção, texto, situação, resposta e resultado */
-var DestHist={pend:{},labels:{inclusao:'inclusão',remocao:'remoção',retirado:'retirada pelo gabinete',reativado:'reativação',texto:'texto',situacao:'situação',resposta:'resposta',resultado:'resultado do destaque'}};
+var DestHist={pend:{},labels:{inclusao:'inclusão',remocao:'remoção',retirado:'retirada pelo gabinete',reativado:'reativação',mantido:'destaque mantido',mantido_desfeito:'manutenção desfeita',texto:'texto',situacao:'situação',resposta:'resposta',resultado:'resultado do destaque'}};
 DestHist.write=function(d,sub,antes,depois){ return Hist.write(S.cur,{proc:d.proc,numero:d.numero||(S.procs[d.proc]&&S.procs[d.proc].numero)||'',campo:'destaque',sub:sub,dest:d.id,destGab:d.gab,tipo:'destaque',antes:antes||'',depois:depois||''}); };
 DestHist.val=function(d,sub){ return (sub==='texto'?d.texto:sub==='resposta'?d.resposta:d.resultadoDestaque)||''; };
 DestHist.start=function(d,sub){ var k=d.id+'|'+sub; if(!DestHist.pend[k]) DestHist.pend[k]={d:d,sub:sub,antes:DestHist.val(d,sub),pid:S.cur}; };
@@ -1414,7 +1417,7 @@ function diffView(a,b){
 }
 function histEntry(e,open){
   var g=gabById(e.gab), canRestore=isRelator()&&['retirada','reinclusao','exclusao','destaque','acordo'].indexOf(e.tipo)<0&&e.campo!=='processo'&&e.campo!=='retirada'&&S.procs[e.proc]&&!retirado(S.procs[e.proc]);
-  var acao={restauracao:'restaurou versão anterior',retirada:e.campo==='retirada'?'retirou o processo de pauta':'excluiu o processo',exclusao:'excluiu o processo',reinclusao:'reincluiu o processo na pauta'}[e.tipo]||(e.tipo==='destaque'?(e.sub==='inclusao'?'incluiu o destaque':e.sub==='remocao'?'removeu o destaque':e.sub==='retirado'?'retirou o destaque':e.sub==='reativado'?'reativou o destaque':'alterou'):e.tipo==='acordo'?(e.depois?'registrou concordância':'desfez a concordância'):'alterou');
+  var acao={restauracao:'restaurou versão anterior',retirada:e.campo==='retirada'?'retirou o processo de pauta':'excluiu o processo',exclusao:'excluiu o processo',reinclusao:'reincluiu o processo na pauta'}[e.tipo]||(e.tipo==='destaque'?(e.sub==='inclusao'?'incluiu o destaque':e.sub==='remocao'?'removeu o destaque':e.sub==='retirado'?'retirou o destaque':e.sub==='mantido'?'manteve o destaque':e.sub==='mantido_desfeito'?'desfez a manutenção do destaque':e.sub==='reativado'?'reativou o destaque':'alterou'):e.tipo==='acordo'?(e.depois?'registrou concordância':'desfez a concordância'):'alterou');
   var btn=null;
   if(canRestore){ btn=h('button',{class:'btn sm',type:'button',text:'Voltar ao texto anterior a esta alteração'}); btn.addEventListener('click',function(){ restoreEntry(e); }); }
   return h('details',{class:'hent',open:open?true:null},
@@ -1494,7 +1497,7 @@ async function exportDestaques(modo){
   var list=src.map(function(p){
     var rf=retirado(p)?retiradaFrase(p.retirada):'', ds=destOf(p.id);
     var acTxt=function(d,alvo){ var l=acordosDe(d.id,alvo).map(function(a){ var g=gabById(a.gab); return (g?g.sigla:'?')+(alvo==='resposta'?': de acordo com a resposta':': de acordo com o destaque'); }); return l.length?'\n'+l.join('\n'):''; };
-    var rows=ds.map(function(d){ var g=gabById(d.gab); return {texto:pre(d.texto,g&&g.sigla)+acTxt(d,'destaque'),resposta:pre(d.resposta,rel&&rel.sigla)+acTxt(d,'resposta'),resultado:(d.resultadoDestaque||'').trim()?d.resultadoDestaque:rf}; });
+    var rows=ds.map(function(d){ var g=gabById(d.gab); return {texto:pre(d.texto,g&&g.sigla)+acTxt(d,'destaque'),resposta:pre(d.resposta,rel&&rel.sigla)+acTxt(d,'resposta')+(d.mantido?'\n'+(g?g.sigla:'?')+': destaque mantido':''),resultado:(d.resultadoDestaque||'').trim()?d.resultadoDestaque:rf}; });
     var resultado=p.resultado||'';
     if(!retirado(p)&&(geral||ds.length)){
       var st=outros.map(function(g){ return {g:g,s:analiseDe(p.id,g.id)}; });
@@ -1654,6 +1657,8 @@ function filtered(){
     if(mine&&S.filter==='semdest'&&analiseDe(p.id,S.me.gab)!=='sem') return;
     if(mine&&S.filter==='rever'&&!alteradoApos(p.id,S.me.gab)) return;
     if(mine&&S.filter==='acordo'&&!aguardaAcordo(p,S.me.gab)) return;
+    if(mine&&S.filter==='aguardpos'&&!aguardaPosicao(p)) return;
+    if(mine&&S.filter==='mantidos'&&!temMantido(p)) return;
     if(mine&&S.filter==='acatado'&&!temSit(p,'acatado')) return;
     if(mine&&S.filter==='parcial'&&!temSit(p,'parcial')) return;
     if(mine&&S.filter==='naoacatado'&&!temSit(p,'nao_acatado')) return;
@@ -1682,7 +1687,7 @@ function refreshSide(){
   [['todos','Todos',ps.length],
    ['destaque',rel?'Destaques recebidos':'Com destaque',ps.filter(comDestaque).length]]
    .concat(rel?[['acatado','Destaque acolhido',ps.filter(function(p){return temSit(p,'acatado');}).length],['parcial','Destaque parcialmente acolhido',ps.filter(function(p){return temSit(p,'parcial');}).length],['naoacatado','Destaque não acolhido',ps.filter(function(p){return temSit(p,'nao_acatado');}).length]]:[])
-   .concat(rel?[['aguardando','Aguardando análise',ps.filter(function(p){ return outrosGabs().some(function(g){ return analiseDe(p.id,g.id)==='pendente'; }); }).length],['alterados','Alterados',ps.filter(edited).length]]
+   .concat(rel?[['aguardpos','Aguardando posição do destacante',ps.filter(aguardaPosicao).length],['mantidos','Destaques mantidos',ps.filter(temMantido).length],['aguardando','Aguardando análise',ps.filter(function(p){ return outrosGabs().some(function(g){ return analiseDe(p.id,g.id)==='pendente'; }); }).length],['alterados','Alterados',ps.filter(edited).length]]
      :[['naoanal','Não analisados',ps.filter(function(p){return analiseDe(p.id,S.me.gab)==='pendente';}).length],
        ['semdest','Sem destaque',ps.filter(function(p){return analiseDe(p.id,S.me.gab)==='sem';}).length],
        ['meus','Destacados por nós',ps.filter(function(p){return destOf(p.id).some(function(d){return d.gab===S.me.gab;});}).length],
@@ -2066,7 +2071,8 @@ Rasc.publicarVarios=async function(lista,btn){
 function acordoRow(d,alvo,p,pa){
   var lst=acordosDe(d.id,alvo), mine=acordoDe(d.id,alvo,S.me.gab);
   var pode=S.me.gab!==pa.gabinete&&!retirado(p)&&(alvo==='destaque'?d.gab!==S.me.gab:temResposta(d));
-  if(!lst.length&&!pode) return null;
+  var autor=alvo==='resposta'&&d.gab===S.me.gab&&pode;
+  if(!lst.length&&!pode&&!(alvo==='resposta'&&d.mantido)) return null;
   var row=h('div',{class:'acrow'},lst.map(function(a){ var g=gabById(a.gab), old=acordoAntigo(a,d);
     return h('span',{class:'acchip'+(old?' old':''),title:old?'Concordância dada antes da última alteração':''},'✓ '+(g?g.sigla:'?')+(a.alvo==='resposta'?' de acordo com a resposta':' de acordo com o destaque')+' · '+(a.porNome||'')+' em '+fmtData(a.em)+(old?' · antes da última alteração':'')); }));
   if(pode){
@@ -2081,7 +2087,19 @@ function acordoRow(d,alvo,p,pa){
         refreshSide(); renderCounts(); refreshDestaques(true);
       }catch(err){ toast(errMsg(err),true); b.disabled=false; }
     });
+    if(autor&&d.mantido&&!mine){ b.disabled=true; b.title='Você manteve o destaque. Desfaça para concordar com a resposta.'; }
     row.append(b);
+  }
+  if(alvo==='resposta'&&d.mantido){ var gm=gabById(d.gab), oldM=[d.respostaEm,d.resultadoEm].some(function(x){ return x&&String(x)>String(d.mantidoEm); });
+    row.insertBefore(h('span',{class:'acchip mant'+(oldM?' old':''),title:oldM?'Mantido antes da última alteração da resposta':''},'⚑ '+(gm?gm.sigla:'?')+' manteve o destaque · '+(d.mantidoPorNome||'')+' em '+fmtData(d.mantidoEm)+(oldM?' · antes da última alteração':'')),row.firstChild); }
+  if(autor){
+    var mb=h('button',{class:'btn sm'+(d.mantido?' on':''),type:'button','aria-pressed':String(!!d.mantido),disabled:!d.mantido&&mine?true:null,title:!d.mantido&&mine?'Você concordou com a resposta. Desfaça para manter o destaque.':'Registra que o seu gabinete mantém o destaque após a resposta'},d.mantido?'⚑ Destaque mantido (desfazer)':'Manter destaque');
+    mb.addEventListener('click',async function(){ mb.disabled=true; var path='pautas/'+S.cur+'/destaques/'+d.id, t=now();
+      try{ if(d.mantido){ await db.doc(path).update({mantido:false,mantidoPor:'',mantidoPorNome:'',mantidoEm:''}); await DestHist.write(d,'mantido_desfeito','Destaque mantido',''); d.mantido=false; }
+        else { await db.doc(path).update({mantido:true,mantidoPor:S.me.uid,mantidoPorNome:S.me.nome,mantidoEm:t}); d.mantido=true; d.mantidoPorNome=S.me.nome; d.mantidoEm=t; await DestHist.write(d,'mantido','','Destaque mantido'); }
+        refreshSide(); renderCounts(); refreshDestaques(true); }
+      catch(e){ toast(errMsg(e),true); mb.disabled=false; } });
+    row.append(mb);
   }
   return row;
 }
@@ -2126,7 +2144,7 @@ function drawDestaquesCard(card,p,pa){
       del.addEventListener('click',async function(){
         if(!arm){ arm=true; del.style.color='var(--bad)'; del.title='Clique de novo para remover'; tt=setTimeout(function(){arm=false;del.style.color='';del.title='Remover destaque';},3000); return; }
         clearTimeout(tt); try{ if(getR()) await Rasc.drop(rid); var t=now(); await db.doc(path).update({removido:true,removidoPor:S.me.uid,removidoPorNome:S.me.nome,removidoEm:t}); await DestHist.write(d,'remocao',d.texto||'',''); toast('Destaque removido. O registro fica no Histórico de alterações.'); }catch(e){ toast(errMsg(e),true); } }); }
-    var retB=null;
+    var retB=null, retMov=false;
     if(meu&&!retirado(p)){ var armR=false, tR; retB=h('button',{class:'btn sm',type:'button',title:'Retira o destaque: ele continua registrado, mas o processo passa a contar como sem destaque do seu gabinete'},'Retirar destaque');
       retB.addEventListener('click',async function(){
         if(!armR){ armR=true; retB.textContent='Confirmar retirada do destaque'; tR=setTimeout(function(){armR=false;retB.textContent='Retirar destaque';},4000); return; }
@@ -2147,9 +2165,9 @@ function drawDestaquesCard(card,p,pa){
       acordoRow(d,'destaque',p,pa),
       h('div',{class:'f'},h('label',{for:ids[2],text:'Resposta'+(relG?' ('+relG.sigla+', gabinete relator)':'')}),rs),
       h('div',{class:'f'},h('label',{for:ids[3],text:'Resultado do destaque'}),rd),
-      acordoRow(d,'resposta',p,pa),
+      (function(){ var rr=acordoRow(d,'resposta',p,pa); if(rr&&retB&&meu&&temResposta(d)){ rr.append(retB); retMov=true; } return rr; })(),
       bar?bar.el:null,
-      retB?h('div',{class:'dact'},retB):null));
+      retB&&!retMov?h('div',{class:'dact'},retB):null));
   });
   destRetirados(p.id).forEach(function(d){
     var g=gabById(d.gab), meu=d.gab===S.me.gab, path='pautas/'+S.cur+'/destaques/'+d.id, reat=null;
