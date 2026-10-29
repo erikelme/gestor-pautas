@@ -754,6 +754,28 @@ function cellParas(text,opts){
     return '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:jc w:val="'+(opts.jc||'both')+'"/></w:pPr>'+runs+'</w:p>';
   }).join('');
 }
+/* tabela de sustentações orais e impedimentos, uma por gabinete relator */
+async function buildMarcasDocx(meta,secoes){
+  var widths=[560,2700,2700,5200,1700,2276];
+  var border='<w:tblBorders>'+['top','left','bottom','right','insideH','insideV'].map(function(b){return '<w:'+b+' w:val="single" w:sz="4" w:space="0" w:color="000000"/>';}).join('')+'</w:tblBorders>';
+  function cell(w,inner,shade){ return '<w:tc><w:tcPr><w:tcW w:w="'+w+'" w:type="dxa"/>'+(shade?'<w:shd w:val="clear" w:color="auto" w:fill="E7ECEA"/>':'')+'</w:tcPr>'+inner+'</w:tc>'; }
+  var head='<w:tr><w:trPr><w:tblHeader/></w:trPr>'+['Ch','Processo','Classe','Partes','Sustentação oral','Impedimento'].map(function(t,i){ return cell(widths[i],cellParas(t,{b:true,jc:'left'}),true); }).join('')+'</w:tr>';
+  function tabela(ps){ return '<w:tbl><w:tblPr><w:tblW w:w="'+widths.reduce(function(a,b){return a+b;},0)+'" w:type="dxa"/><w:tblLayout w:type="fixed"/>'+border+'<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>'+widths.map(function(w){return '<w:gridCol w:w="'+w+'"/>';}).join('')+'</w:tblGrid>'+head+
+    ps.map(function(p){ var ch=String(p.ordem==null?'':p.ordem); if(/^\d$/.test(ch)) ch='0'+ch;
+      return '<w:tr><w:trPr><w:cantSplit/></w:trPr>'+[ch,p.numero||'',p.classe||'',p.partes||'',p.sustentacao||'',p.impedimento||''].map(function(t,i){ return cell(widths[i],cellParas(t,{jc:'left'})); }).join('')+'</w:tr>'; }).join('')+'</w:tbl><w:p/>'; }
+  function par(t,sz,before){ return '<w:p><w:pPr><w:keepNext/><w:spacing w:before="'+(before||0)+'" w:after="160"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:sz w:val="'+sz+'"/></w:rPr><w:t xml:space="preserve">'+xesc(t)+'</w:t></w:r></w:p>'; }
+  var titulo=['Sustentações orais e impedimentos – todas as pautas',meta.tipoSessao&&meta.dataSessao?meta.tipoSessao+' de '+(meta.periodo||meta.dataSessao):''].filter(Boolean).join(' – ');
+  var body=par(titulo,22,0);
+  secoes.forEach(function(sec,i){ body+=par(sec.titulo,21,i?240:120)+(sec.processos.length?tabela(sec.processos):'<w:p><w:r><w:t xml:space="preserve">'+xesc(sec.vazio||'Nenhum processo.')+'</w:t></w:r></w:p><w:p/>'); });
+  var doc='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="'+W+'" xmlns:r="'+R+'"><w:body>'+body+'<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="851" w:right="851" w:bottom="851" w:left="851" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>';
+  var zip=new JSZip();
+  zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>');
+  zip.file('_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="'+PR+'"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  zip.file('word/_rels/document.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="'+PR+'"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+  zip.file('word/styles.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="'+W+'"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:lang w:val="pt-BR"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>');
+  zip.file('word/document.xml',doc);
+  return zip;
+}
 async function buildDestaquesDocx(meta,processos){
   var widths=[560,2700,5000,4500,2376];
   var border='<w:tblBorders>'+['top','left','bottom','right','insideH','insideV'].map(function(b){return '<w:'+b+' w:val="single" w:sz="4" w:space="0" w:color="000000"/>';}).join('')+'</w:tblBorders>';
@@ -1004,7 +1026,7 @@ function cnjOk(n){
   for(var i=0;i<s.length;i++) r=(r*10+(+s[i]))%97;
   return ('0'+(98-r)).slice(-2)===m[2];
 }
-return {isGabDocx:isGabDocx,gabDocxToDocx:gabDocxToDocx,pdfToDocx:pdfToDocx,diffWords:diffWords,extract:extract,buildDocx:buildDocx,buildDestaquesDocx:buildDestaquesDocx,procHash:procHash,cnjOk:cnjOk,partyLines:partyLines,classeLine:classeLine,ELAB:ELAB};
+return {isGabDocx:isGabDocx,gabDocxToDocx:gabDocxToDocx,pdfToDocx:pdfToDocx,diffWords:diffWords,extract:extract,buildDocx:buildDocx,buildDestaquesDocx:buildDestaquesDocx,buildMarcasDocx:buildMarcasDocx,procHash:procHash,cnjOk:cnjOk,partyLines:partyLines,classeLine:classeLine,ELAB:ELAB};
 })();
 
 
@@ -1533,7 +1555,7 @@ function destList(modo,pa){
         rows=[{texto:txt,resposta:'',resultado:''}];
       }
     } else if(geral&&retirado(p)&&!ds.length){ resultado=rf+(resultado.trim()?'\n'+resultado:''); }
-    return {ordem:p.ordem,numero:(p.numero||'')+(marcasTxt(p)?'\n'+marcasTxt(p):''),resultado:resultado,destaques:rows};
+    return {ordem:p.ordem,numero:p.numero,resultado:resultado,destaques:rows};
   });
   return list;
 }
@@ -1578,6 +1600,30 @@ async function exportPeriodo(modo){
     if(falta.length) setTimeout(function(){ toast('Arquivo gerado sem a pauta do '+falta.map(function(g){ return 'Gab '+g.num; }).join(' e ')+': ainda não foi enviada ao sistema para este período.',true); },1500);
   }catch(e){ console.error(e); toast('Falha ao reunir as pautas do período: '+errMsg(e),true); }
 }
+async function exportMarcasPeriodo(){
+  var pa=curPauta(); if(!pa) return; Hist.commitAll(); await Save.flush();
+  var mesmo=S.pautas.filter(function(x){ return x.meta&&x.meta.dataSessao===pa.meta.dataSessao&&(x.meta.tipoSessao||'')===(pa.meta.tipoSessao||''); })
+    .sort(function(a,b){ var ga=gabById(a.gabinete), gb=gabById(b.gabinete); return (ga?+ga.num:99)-(gb?+gb.num:99); });
+  toast('Reunindo as pautas do período…');
+  try{
+    var secoes=[];
+    for(var i=0;i<mesmo.length;i++){
+      var x=mesmo[i], g=gabById(x.gabinete), procs;
+      if(x.id===S.cur) procs=procsList();
+      else { var snap=await db.collection('pautas').doc(x.id).collection('processos').get(); procs=snap.docs.map(function(d){ var v=d.data(); v.id=d.id; return v; }).filter(function(p){ return !retirado(p); }).sort(function(a,b){return (+a.ordem||0)-(+b.ordem||0)||(a.pos||0)-(b.pos||0);}); }
+      var lista=procs.filter(function(p){ return marcasDe(p).length; }).map(function(p){
+        var m=p.marcas||{};
+        return {ordem:p.ordem,numero:p.numero,classe:p.classe,partes:(p.partes||[]).map(function(q){ return q.polo+': '+q.nome; }).join('\n'),
+          sustentacao:m.sustentacao?'Sim':'',impedimento:MARCAS.filter(function(k){ return k[0].indexOf('imp_')===0&&m[k[0]]; }).map(function(k){ return k[1].replace('Impedimento – ',''); }).join('\n')}; });
+      secoes.push({titulo:'Pauta do '+(g?'Gab '+g.num+' – '+g.curto:'gabinete não identificado'),processos:lista,vazio:'Nenhum processo com sustentação oral ou impedimento.'});
+    }
+    var falta=GABS.filter(function(g){ return !mesmo.some(function(x){ return x.gabinete===g.id; }); });
+    var zip=await C.buildMarcasDocx(Object.assign({},pa.meta,{periodo:periodo(pa.meta,true)}),secoes);
+    var d=(periodo(pa.meta,true)||'').replace(/\//g,'-');
+    download('Sustentacoes e impedimentos - todas as pautas'+(d?' - '+d:'')+'.docx',await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}));
+    if(falta.length) setTimeout(function(){ toast('Arquivo gerado sem a pauta do '+falta.map(function(g){ return 'Gab '+g.num; }).join(' e ')+': ainda não foi enviada ao sistema para este período.',true); },1500);
+  }catch(e){ console.error(e); toast('Falha ao reunir as pautas do período: '+errMsg(e),true); }
+}
 function menuPeriodo(anchor){
   closeMenu(); var r=anchor.getBoundingClientRect();
   var m=h('div',{class:'menu',id:'dlMenu',role:'menu'},
@@ -1595,7 +1641,8 @@ $('#dst').addEventListener('click',function(e){
     h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques('naoacolhidos'); }},h('b',{text:'Só não acolhidos'}),h('span',{text:'Processos com destaque não acolhido ou parcialmente acolhido, com todos os destaques do processo.'})),
     h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques('todos'); }},h('b',{text:'Todos os destacados'}),h('span',{text:'Todos os processos com destaque, sem a ementa.'})),
     h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques('geral'); }},h('b',{text:'Geral (todos os processos)'}),h('span',{text:'Todos os processos da pauta; sem destaque e não analisados aparecem no Resultado.'})),
-    h('button',{type:'button',role:'menuitem',class:'msep',onclick:function(ev){ ev.stopPropagation(); menuPeriodo($('#dst')); }},h('b',{text:'Todas as pautas do período ▸'}),h('span',{text:'Um arquivo com as pautas dos três gabinetes do mesmo período, uma tabela por gabinete.'})));
+    h('button',{type:'button',role:'menuitem',class:'msep',onclick:function(ev){ ev.stopPropagation(); menuPeriodo($('#dst')); }},h('b',{text:'Todas as pautas do período ▸'}),h('span',{text:'Um arquivo com as pautas dos três gabinetes do mesmo período, uma tabela por gabinete.'})),
+    h('button',{type:'button',role:'menuitem',class:'msep',onclick:function(){ closeMenu(); exportMarcasPeriodo(); }},h('b',{text:'Sustentações orais e impedimentos'}),h('span',{text:'Todas as pautas do período, uma tabela por gabinete, só com os processos marcados.'})));
   m.style.top=(r.bottom+6+window.scrollY)+'px'; m.style.right=Math.max(16,document.documentElement.clientWidth-r.right)+'px';
   document.body.append(m); m.querySelector('button').focus();
 });
