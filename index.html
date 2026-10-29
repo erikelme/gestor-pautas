@@ -1101,6 +1101,7 @@ function retiradaFrase(r){ if(!r) return ''; var m=motivoTxt(r), d=(r.destino||'
 function destOf(pid){ return Object.keys(S.dest).map(function(k){return S.dest[k];}).filter(function(d){return d.proc===pid&&!d.removido&&!d.retirado;}).sort(function(a,b){return String(a.criadoEm).localeCompare(String(b.criadoEm));}); }
 function destRetirados(pid){ return Object.keys(S.dest).map(function(k){return S.dest[k];}).filter(function(d){return d.proc===pid&&!d.removido&&d.retirado;}).sort(function(a,b){return String(a.criadoEm).localeCompare(String(b.criadoEm));}); }
 function retirouDest(pid,gab){ return destRetirados(pid).some(function(d){ return d.gab===gab; }); }
+function semDecisao(p){ return destOf(p.id).some(function(d){ return !d.situacao||d.situacao==='destacado'; }); }
 function comDestaque(p){ return destOf(p.id).length>0; }
 /* destaques numa situação: relator vê todos; os demais, só os do próprio gabinete */
 function temSit(p,sit){ var rel=isRelator(); return destOf(p.id).some(function(d){ return d.situacao===sit&&(rel||d.gab===S.me.gab); }); }
@@ -1650,7 +1651,8 @@ function filtered(){
     var mine=p._pauta===undefined;
     if(mine&&S.filter==='ementa'&&p.situacao!=='ementa') return;
     if(mine&&S.filter==='elaboracao'&&p.situacao!=='elaboracao') return;
-    if(mine&&S.filter==='destaque'&&!comDestaque(p)) return;
+    if(mine&&S.filter==='destaque'&&!(isRelator()?semDecisao(p):comDestaque(p))) return;
+    if(mine&&S.filter==='todosdest'&&!comDestaque(p)) return;
     if(mine&&S.filter==='meus'&&!destOf(p.id).some(function(d){return d.gab===S.me.gab;})) return;
     if(mine&&S.filter==='alterados'&&!edited(p)) return;
     if(mine&&S.filter==='naoanal'&&analiseDe(p.id,S.me.gab)!=='pendente') return;
@@ -1685,7 +1687,8 @@ function refreshSide(){
   var chips=$('#chips'); if(!chips) return; chips.innerHTML=''; var fl=[];
   var ps=procsList(), rel=isRelator();
   [['todos','Todos',ps.length],
-   ['destaque',rel?'Destaques recebidos':'Com destaque',ps.filter(comDestaque).length]]
+   ['destaque',rel?'Aguardando resposta':'Com destaque',ps.filter(rel?semDecisao:comDestaque).length]]
+   .concat(rel?[['todosdest','Todos com destaque',ps.filter(comDestaque).length]]:[])
    .concat(rel?[['acatado','Destaque acolhido',ps.filter(function(p){return temSit(p,'acatado');}).length],['parcial','Destaque parcialmente acolhido',ps.filter(function(p){return temSit(p,'parcial');}).length],['naoacatado','Destaque não acolhido',ps.filter(function(p){return temSit(p,'nao_acatado');}).length]]:[])
    .concat(rel?[['aguardpos','Aguardando posição do destacante',ps.filter(aguardaPosicao).length],['mantidos','Destaques mantidos',ps.filter(temMantido).length],['aguardando','Aguardando análise',ps.filter(function(p){ return outrosGabs().some(function(g){ return analiseDe(p.id,g.id)==='pendente'; }); }).length],['alterados','Alterados',ps.filter(edited).length]]
      :[['naoanal','Não analisados',ps.filter(function(p){return analiseDe(p.id,S.me.gab)==='pendente';}).length],
