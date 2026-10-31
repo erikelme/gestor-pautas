@@ -327,7 +327,7 @@ body.perfil-sec #up{display:none}
     <div class="bar-row">
       <span class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 21h14M4 8h16M7 8l-3 6a3 3 0 0 0 6 0zM17 8l-3 6a3 3 0 0 0 6 0zM12 3l-6 5M12 3l6 5"/></svg>Gestor de Pautas</span>
       <label class="vh" for="pick">Pauta aberta</label>
-      <select class="pick vh" id="pick" hidden tabindex="-1" aria-hidden="true"></select>
+      <select class="pick" id="pick" hidden></select>
       <span class="grow"></span>
       <span class="save" id="save" aria-live="polite"><span class="dot"></span><span id="saveTxt">Conectando…</span></span>
       <input type="file" id="file" class="vh" accept=".docx,.pdf">
@@ -1757,8 +1757,17 @@ if($('#csv')) $('#csv').addEventListener('click',function(){
 function render(){ renderTop(); renderMain(); }
 function renderTop(){
   var pa=curPauta(), pick=$('#pick'); pick.innerHTML='';
-  S.pautas.forEach(function(x){ pick.append(h('option',{value:x.id,text:pautaLabel(x)})); });
-  pick.hidden=!S.pautas.length; if(pa) pick.value=pa.id; renderPnav();
+  var cl=classificar(), lim=keyOf(addDias(String(hojeKey()).replace(/(\d{4})(\d{2})(\d{2})/,'$3/$2/$1'),-92)), ocultas=0;
+  [['Em andamento',cl.andamento],['Futuras',cl.futuras],['Anteriores',cl.anteriores]].forEach(function(gr){
+    var og=h('optgroup',{label:gr[0]}), n=0;
+    gr[1].forEach(function(g){
+      var antiga=gr[0]==='Anteriores'&&!S.verAntigas&&g.ini<lim&&!g.pautas.some(function(x){ return x.id===S.cur; });
+      if(antiga){ ocultas+=g.pautas.length; return; }
+      g.pautas.forEach(function(x){ og.append(h('option',{value:x.id,text:pautaLabel(x)})); n++; }); });
+    if(!n) og.append(h('option',{disabled:true,text:'(nenhuma)'}));
+    pick.append(og); });
+  if(ocultas) pick.append(h('option',{value:'__antigas',text:'Mostrar mais antigas… ('+ocultas+')'}));
+  pick.hidden=!S.pautas.length; if(pa) pick.value=pa.id; var nav=$('#pnav'); if(nav) nav.hidden=true;
   $('#dl').hidden=$('#dst').hidden=$('#sess').hidden=!pa;
   $('#vpdf').hidden=!(pa&&(pa.fonte==='pdf'||pa.fonte==='gabdocx'));
   if(pa){ $('#vpdf').lastChild.textContent=pa.fonte==='gabdocx'?'Baixar Word original':'Ver PDF original'; }
@@ -1796,7 +1805,7 @@ document.querySelectorAll('[data-meta]').forEach(function(inp){
   inp.addEventListener('change',function(){ if(inp.dataset.meta==='dataSessao'||inp.dataset.meta==='tipoSessao'){ renderTop(); if(S.sel) renderForm(); } });
 });
 $('#m_gab').addEventListener('change',async function(e){ var pa=curPauta(); if(!pa||!(pa.gabAuto===true&&pa.criadoPor===S.me.uid)||!e.target.value) return; pa.gabinete=e.target.value; pa.gabAuto=false; savePauta(pa); await Save.flush(); toast('Gabinete relator definido.'); renderTop(); renderMain(); });
-$('#pick').addEventListener('change',function(e){ openPauta(e.target.value); });
+$('#pick').addEventListener('change',function(e){ if(e.target.value==='__antigas'){ S.verAntigas=true; renderTop(); toast('Períodos mais antigos incluídos no seletor, em Anteriores.'); return; } openPauta(e.target.value); });
 async function deletePauta(pid){
   try{
     await Save.flush(); var base=db.collection('pautas').doc(pid);
