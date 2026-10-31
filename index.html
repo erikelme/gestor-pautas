@@ -297,6 +297,25 @@ body.perfil-sec #up{display:none}
 .antdet summary{cursor:pointer;font-size:13px;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .antdet summary .antres{color:var(--muted);flex:1 1 200px}
 .antbody{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+.pnav{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:0 16px 10px}
+.pnav .plbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.pnav .pgrp{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--sunk)}
+.pnav .pper{font-size:12.5px;font-weight:600;margin-right:2px}
+.pgab{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:3px 9px;font-size:12.5px;cursor:pointer;color:var(--ink)}
+.pgab:hover{border-color:var(--accent)}
+.pgab.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.pgab.off{opacity:.55;cursor:default;border-style:dashed}
+.pnav .pmore{margin-left:auto;display:flex;gap:6px}
+.pmenu{max-height:70vh;overflow:auto;min-width:340px}
+.pmenu .pmg{padding:8px 12px;border-bottom:1px solid var(--line2)}
+.pmenu .pmg:last-child{border-bottom:0}
+.pmenu .pper{display:block;font-size:12.5px;font-weight:600;margin-bottom:6px}
+.pmenu .pbtns{display:flex;flex-wrap:wrap;gap:6px}
+.menu.pmenu{width:min(420px,calc(100vw - 32px))}
+.menu .pgab{display:inline-block;border:1px solid var(--line);background:var(--panel);padding:3px 9px;border-radius:6px;font-size:12.5px}
+.menu .pgab:hover{background:var(--accent-soft)}
+.menu .pgab.on{background:var(--accent);color:#fff}
+.menu .pgab.off{background:none}
 .setup{max-width:640px;margin:8vh auto;padding-inline:16px;line-height:1.6}
 .setup code{font-family:var(--mono);background:var(--sunk);padding:1px 5px;border-radius:4px}
 </style>
@@ -308,7 +327,7 @@ body.perfil-sec #up{display:none}
     <div class="bar-row">
       <span class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 21h14M4 8h16M7 8l-3 6a3 3 0 0 0 6 0zM17 8l-3 6a3 3 0 0 0 6 0zM12 3l-6 5M12 3l6 5"/></svg>Gestor de Pautas</span>
       <label class="vh" for="pick">Pauta aberta</label>
-      <select class="pick" id="pick" hidden></select>
+      <select class="pick vh" id="pick" hidden tabindex="-1" aria-hidden="true"></select>
       <span class="grow"></span>
       <span class="save" id="save" aria-live="polite"><span class="dot"></span><span id="saveTxt">Conectando…</span></span>
       <input type="file" id="file" class="vh" accept=".docx,.pdf">
@@ -319,6 +338,7 @@ body.perfil-sec #up{display:none}
       <span class="who-chip" id="who"></span>
       <button class="btn sm ghost" id="logout" type="button">Sair</button>
     </div>
+    <div class="pnav" id="pnav" hidden></div>
     <div class="sess" id="sess" hidden>
       <div class="sf" style="flex:1 1 230px"><label for="m_tribunal">Tribunal</label><input id="m_tribunal" data-meta="tribunal"></div>
       <div class="sf" style="flex:2 1 320px"><label for="m_orgao">Órgão julgador</label><input id="m_orgao" data-meta="orgao"></div>
@@ -1209,6 +1229,60 @@ function periodo(meta,curto){
   if(curto&&i.slice(6)===f.slice(6)) return i.slice(0,5)+' a '+f;
   return i+' a '+f;
 }
+/* ─── classificação das pautas: anteriores, em andamento, futuras ─── */
+function keyOf(d){ var m=/(\d{2})\/(\d{2})\/(\d{4})/.exec(d||''); return m?+(m[3]+m[2]+m[1]):0; }
+function hojeKey(){ var t=new Date(); return t.getFullYear()*10000+(t.getMonth()+1)*100+t.getDate(); }
+function ehVirtual(meta){ return /virtual/i.test(meta&&meta.tipoSessao||''); }
+function grupoKey(x){ return (x.meta.tipoSessao||'')+'|'+(x.meta.dataSessao||'')+'|'+(ehVirtual(x.meta)?fimSessao(x.meta):''); }
+function classificar(){
+  var hoje=hojeKey(), grupos={};
+  S.pautas.forEach(function(x){ if(!x.meta) return; var k=grupoKey(x); (grupos[k]=grupos[k]||{key:k,meta:x.meta,pautas:[]}).pautas.push(x); });
+  var gl=Object.keys(grupos).map(function(k){ var g=grupos[k]; g.ini=keyOf(g.meta.dataSessao); g.fim=ehVirtual(g.meta)?keyOf(fimSessao(g.meta)):g.ini; g.virtual=ehVirtual(g.meta);
+    g.pautas.sort(function(a,b){ var ga=gabById(a.gabinete), gb=gabById(b.gabinete); return (ga?+ga.num:99)-(gb?+gb.num:99); }); return g; });
+  var vAnd=gl.filter(function(g){ return g.virtual&&g.ini&&g.ini<=hoje&&hoje<g.fim; });
+  var limite=vAnd.length?Math.max.apply(null,vAnd.map(function(g){return g.fim;})):keyOf(addDias(String(hoje).replace(/(\d{4})(\d{2})(\d{2})/,'$3/$2/$1'),7));
+  var ords=gl.filter(function(g){ return !g.virtual&&g.ini>=hoje&&g.ini<=limite; }).sort(function(a,b){ return a.ini-b.ini; });
+  var ordAnd=ords.length?ords.filter(function(g){ return g.ini===ords[0].ini; }):[];
+  var r={andamento:[],futuras:[],anteriores:[]};
+  gl.forEach(function(g){
+    if(vAnd.indexOf(g)>=0||ordAnd.indexOf(g)>=0) r.andamento.push(g);
+    else if((g.virtual?g.fim<=hoje:g.ini<hoje)) r.anteriores.push(g);
+    else r.futuras.push(g);
+  });
+  r.andamento.sort(function(a,b){ return a.ini-b.ini||(b.virtual-a.virtual); });
+  r.futuras.sort(function(a,b){ return a.ini-b.ini; });
+  r.anteriores.sort(function(a,b){ return b.ini-a.ini; });
+  return r;
+}
+function perLabel(g){ return (g.virtual?'Virtual ':((g.meta.tipoSessao||'Sessão').replace(/^Sess[ãa]o\s*/i,'')||'Sessão')+' ')+(g.virtual?(periodo(g.meta,true)||g.meta.dataSessao):g.meta.dataSessao); }
+function gabBtns(g){
+  return GABS.map(function(gb){ var x=g.pautas.find(function(p){ return p.gabinete===gb.id; });
+    if(!x) return h('button',{class:'pgab off',type:'button',disabled:true,title:'Pauta do Gab '+gb.num+' ainda não enviada',text:'Gab '+gb.num+' · não enviada'});
+    return h('button',{class:'pgab'+(x.id===S.cur?' on':''),type:'button',title:pautaLabel(x),onclick:function(){ closeMenu(); openPauta(x.id); }},'Gab '+gb.num+' · '+gb.sigla); })
+    .concat(g.pautas.filter(function(x){ return !gabById(x.gabinete)||x.gabinete==='secretaria'; }).map(function(x){ return h('button',{class:'pgab'+(x.id===S.cur?' on':''),type:'button',onclick:function(){ closeMenu(); openPauta(x.id); }},'Gabinete ?'); }));
+}
+S.verAntigas=false;
+function renderPnav(){
+  var nav=$('#pnav'); if(!nav) return; nav.innerHTML=''; nav.hidden=!S.pautas.length; if(!S.pautas.length) return;
+  var c=classificar();
+  nav.append(h('span',{class:'plbl',text:'Em andamento'}));
+  if(!c.andamento.length) nav.append(h('span',{class:'muted',style:'font-size:12.5px',text:'Nenhuma pauta em andamento.'}));
+  c.andamento.forEach(function(g){ nav.append(h('div',{class:'pgrp'},h('span',{class:'pper',text:perLabel(g)}),gabBtns(g))); });
+  function menuBtn(lbl,lista,antigas){
+    var b=h('button',{class:'btn sm',type:'button'},lbl+' ('+lista.length+') ▾');
+    var temAtual=lista.some(function(g){ return g.pautas.some(function(x){ return x.id===S.cur; }); }); if(temAtual) b.classList.add('on');
+    b.addEventListener('click',function(e){ e.stopPropagation(); if($('#dlMenu')){ closeMenu(); return; }
+      var r=b.getBoundingClientRect(), lim=keyOf(addDias(String(hojeKey()).replace(/(\d{4})(\d{2})(\d{2})/,'$3/$2/$1'),-92));
+      var vis=antigas&&!S.verAntigas?lista.filter(function(g){ return g.ini>=lim; }):lista, ocultas=lista.length-vis.length;
+      var m=h('div',{class:'menu pmenu',id:'dlMenu',role:'menu'},
+        vis.length?vis.map(function(g){ return h('div',{class:'pmg'},h('span',{class:'pper',text:perLabel(g)}),h('div',{class:'pbtns'},gabBtns(g))); }):h('div',{class:'pmg muted',text:'Nenhuma pauta.'}),
+        ocultas?h('button',{type:'button',role:'menuitem',onclick:function(ev){ ev.stopPropagation(); S.verAntigas=true; closeMenu(); b.click(); }},h('b',{text:'Mostrar mais antigas…'}),h('span',{text:ocultas+' período(s) com mais de 3 meses'})):null);
+      m.style.top=(r.bottom+6+window.scrollY)+'px'; var vw=document.documentElement.clientWidth, mw=Math.min(420,vw-32); m.style.left=Math.max(16,Math.min(r.left,vw-mw-16))+'px';
+      document.body.append(m); });
+    return b;
+  }
+  nav.append(h('span',{class:'pmore'},menuBtn('Futuras',c.futuras),menuBtn('Anteriores',c.anteriores,true)));
+}
 function dateKey(pa){ var m=/(\d{2})\/(\d{2})\/(\d{4})/.exec(pa.meta&&pa.meta.dataSessao||''); return m?+(m[3]+m[2]+m[1]):0; }
 function pautaLabel(x){ var g=gabById(x.gabinete); return (periodo(x.meta,true)||'s/ data')+' · '+(x.meta.tipoSessao||'Sessão')+' · '+(g?'Gab '+g.num+' ('+g.sigla+')':'gabinete não identificado')+' · '+(x.nProcessos||0)+' processos'; }
 
@@ -1307,7 +1381,8 @@ function listenPautas(){
     S.pautas=snap.docs.map(function(d){ var x=d.data(); x.id=d.id; return x; }).sort(function(a,b){ return dateKey(b)-dateKey(a)||String(b.criadoEm).localeCompare(String(a.criadoEm)); });
     Save.ui('','Conectado');
     if(first){ first=false; var last=null; try{ last=localStorage.getItem('gp:last'); }catch(e){}
-      var pick=S.pautas.find(function(p){return p.id===last;})||S.pautas.find(function(p){return p.gabinete===S.me.gab;})||S.pautas[0];
+      var cl=classificar(), andP=[]; cl.andamento.forEach(function(g){ andP=andP.concat(g.pautas); });
+      var pick=andP.find(function(p){return p.gabinete===S.me.gab;})||andP[0]||S.pautas.find(function(p){return p.id===last;})||S.pautas.find(function(p){return p.gabinete===S.me.gab;})||S.pautas[0];
       if(pick) openPauta(pick.id); else render(); }
     else if(S.cur&&!curPauta()){ toast('A pauta aberta foi excluída pelo gabinete relator.'); S.cur=null; stopPautaListeners(); if(S.pautas[0]) openPauta(S.pautas[0].id); else render(); }
     else { renderTop(); }
@@ -1683,7 +1758,7 @@ function render(){ renderTop(); renderMain(); }
 function renderTop(){
   var pa=curPauta(), pick=$('#pick'); pick.innerHTML='';
   S.pautas.forEach(function(x){ pick.append(h('option',{value:x.id,text:pautaLabel(x)})); });
-  pick.hidden=!S.pautas.length; if(pa) pick.value=pa.id;
+  pick.hidden=!S.pautas.length; if(pa) pick.value=pa.id; renderPnav();
   $('#dl').hidden=$('#dst').hidden=$('#sess').hidden=!pa;
   $('#vpdf').hidden=!(pa&&(pa.fonte==='pdf'||pa.fonte==='gabdocx'));
   if(pa){ $('#vpdf').lastChild.textContent=pa.fonte==='gabdocx'?'Baixar Word original':'Ver PDF original'; }
