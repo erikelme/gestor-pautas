@@ -784,15 +784,15 @@ function cellParas(text,opts){
 }
 /* tabela de sustentações orais e impedimentos, uma por gabinete relator */
 async function buildMarcasDocx(meta,secoes){
-  var widths=[560,2700,2700,5200,1700,2276];
+  var widths=[560,2750,2300,4450,1400,1500,2176];
   var border='<w:tblBorders>'+['top','left','bottom','right','insideH','insideV'].map(function(b){return '<w:'+b+' w:val="single" w:sz="4" w:space="0" w:color="000000"/>';}).join('')+'</w:tblBorders>';
   function cell(w,inner,shade){ return '<w:tc><w:tcPr><w:tcW w:w="'+w+'" w:type="dxa"/>'+(shade?'<w:shd w:val="clear" w:color="auto" w:fill="E7ECEA"/>':'')+'</w:tcPr>'+inner+'</w:tc>'; }
-  var head='<w:tr><w:trPr><w:tblHeader/></w:trPr>'+['Ch','Processo','Classe','Partes','Sustentação oral','Impedimento'].map(function(t,i){ return cell(widths[i],cellParas(t,{b:true,jc:'left'}),true); }).join('')+'</w:tr>';
+  var head='<w:tr><w:trPr><w:tblHeader/></w:trPr>'+['Ch','Processo','Classe','Partes','Sustentação oral','Op. julgamento virtual','Impedimento'].map(function(t,i){ return cell(widths[i],cellParas(t,{b:true,jc:'left'}),true); }).join('')+'</w:tr>';
   function tabela(ps){ return '<w:tbl><w:tblPr><w:tblW w:w="'+widths.reduce(function(a,b){return a+b;},0)+'" w:type="dxa"/><w:tblLayout w:type="fixed"/>'+border+'<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>'+widths.map(function(w){return '<w:gridCol w:w="'+w+'"/>';}).join('')+'</w:tblGrid>'+head+
     ps.map(function(p){ var ch=String(p.ordem==null?'':p.ordem); if(/^\d$/.test(ch)) ch='0'+ch;
-      return '<w:tr><w:trPr><w:cantSplit/></w:trPr>'+[ch,p.numero||'',p.classe||'',p.partes||'',p.sustentacao||'',p.impedimento||''].map(function(t,i){ return cell(widths[i],cellParas(t,{jc:'left'})); }).join('')+'</w:tr>'; }).join('')+'</w:tbl><w:p/>'; }
+      return '<w:tr><w:trPr><w:cantSplit/></w:trPr>'+[ch,p.numero||'',p.classe||'',p.partes||'',p.sustentacao||'',p.oposicao||'',p.impedimento||''].map(function(t,i){ return cell(widths[i],cellParas(t,{jc:'left'})); }).join('')+'</w:tr>'; }).join('')+'</w:tbl><w:p/>'; }
   function par(t,sz,before){ return '<w:p><w:pPr><w:keepNext/><w:spacing w:before="'+(before||0)+'" w:after="160"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:sz w:val="'+sz+'"/></w:rPr><w:t xml:space="preserve">'+xesc(t)+'</w:t></w:r></w:p>'; }
-  var titulo=['Sustentações orais e impedimentos – todas as pautas',meta.tipoSessao&&meta.dataSessao?meta.tipoSessao+' de '+(meta.periodo||meta.dataSessao):''].filter(Boolean).join(' – ');
+  var titulo=['Sustentações orais, impedimentos e oposições – todas as pautas',meta.tipoSessao&&meta.dataSessao?meta.tipoSessao+' de '+(meta.periodo||meta.dataSessao):''].filter(Boolean).join(' – ');
   var body=par(titulo,22,0);
   secoes.forEach(function(sec,i){ body+=par(sec.titulo,21,i?240:120)+(sec.processos.length?tabela(sec.processos):'<w:p><w:r><w:t xml:space="preserve">'+xesc(sec.vazio||'Nenhum processo.')+'</w:t></w:r></w:p><w:p/>'); });
   var doc='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="'+W+'" xmlns:r="'+R+'"><w:body>'+body+'<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="851" w:right="851" w:bottom="851" w:left="851" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>';
@@ -1504,7 +1504,7 @@ async function originalBytes(pid){
 /* ═════════ HISTÓRICO DE ALTERAÇÕES ═════════ */
 var CAMPOS=[['numero','Número do processo'],['ordem','Chamada'],['classe','Classe processual'],['codClasse','Código da classe'],['situacao','Situação na pauta'],['link','Link do processo'],['partes','Partes'],['advogados','Advogados'],['ementa','Ementa'],['outros','Outras informações'],['resultado','Resultado do julgamento'],['marcas','Marcações'],['processo','Processo'],['retirada','Retirada de pauta']];
 function campoLabel(c){ var x=CAMPOS.find(function(k){return k[0]===c;}); return x?x[1]:c; }
-var MARCAS=[['sustentacao','Pedido de sustentação oral','Sustentação oral'],['imp_gab25','Impedimento – Des. Ivan Lira','Impedido: IL'],['imp_gab26','Impedimento – Des. Magnus Delgado','Impedido: MD'],['imp_gab27','Impedimento – Desa. Isabelle Marne','Impedido: IM']];
+var MARCAS=[['sustentacao','Pedido de sustentação oral','Sustentação oral'],['oposicao','Oposição ao julgamento virtual','Oposição ao virtual'],['imp_gab25','Impedimento – Des. Ivan Lira','Impedido: IL'],['imp_gab26','Impedimento – Des. Magnus Delgado','Impedido: MD'],['imp_gab27','Impedimento – Desa. Isabelle Marne','Impedido: IM']];
 function marcasDe(p){ var m=p&&p.marcas||{}; return MARCAS.filter(function(x){ return !!m[x[0]]; }); }
 function marcasTxt(p){ return marcasDe(p).map(function(x){ return x[2]; }).join(' · '); }
 function temImpedimento(p){ return marcasDe(p).some(function(x){ return x[0].indexOf('imp_')===0; }); }
@@ -1703,13 +1703,13 @@ async function exportMarcasPeriodo(){
       var lista=procs.filter(function(p){ return marcasDe(p).length; }).map(function(p){
         var m=p.marcas||{};
         return {ordem:p.ordem,numero:p.numero,classe:p.classe,partes:(p.partes||[]).map(function(q){ return q.polo+': '+q.nome; }).join('\n'),
-          sustentacao:m.sustentacao?'Sim':'',impedimento:MARCAS.filter(function(k){ return k[0].indexOf('imp_')===0&&m[k[0]]; }).map(function(k){ return k[1].replace('Impedimento – ',''); }).join('\n')}; });
-      secoes.push({titulo:'Pauta do '+(g?'Gab '+g.num+' – '+g.curto:'gabinete não identificado'),processos:lista,vazio:'Nenhum processo com sustentação oral ou impedimento.'});
+          sustentacao:m.sustentacao?'Sim':'',oposicao:m.oposicao?'Sim':'',impedimento:MARCAS.filter(function(k){ return k[0].indexOf('imp_')===0&&m[k[0]]; }).map(function(k){ return k[1].replace('Impedimento – ',''); }).join('\n')}; });
+      secoes.push({titulo:'Pauta do '+(g?'Gab '+g.num+' – '+g.curto:'gabinete não identificado'),processos:lista,vazio:'Nenhum processo com sustentação oral, impedimento ou oposição ao julgamento virtual.'});
     }
     var falta=GABS.filter(function(g){ return !mesmo.some(function(x){ return x.gabinete===g.id; }); });
     var zip=await C.buildMarcasDocx(Object.assign({},pa.meta,{periodo:periodo(pa.meta,true)}),secoes);
     var d=(periodo(pa.meta,true)||'').replace(/\//g,'-');
-    download('Sustentacoes e impedimentos - todas as pautas'+(d?' - '+d:'')+'.docx',await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}));
+    download('Sustentacoes impedimentos e oposicoes - todas as pautas'+(d?' - '+d:'')+'.docx',await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}));
     if(falta.length) setTimeout(function(){ toast('Arquivo gerado sem a pauta do '+falta.map(function(g){ return 'Gab '+g.num; }).join(' e ')+': ainda não foi enviada ao sistema para este período.',true); },1500);
   }catch(e){ console.error(e); toast('Falha ao reunir as pautas do período: '+errMsg(e),true); }
 }
@@ -1731,7 +1731,7 @@ $('#dst').addEventListener('click',function(e){
     h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques('todos'); }},h('b',{text:'Todos os destacados'}),h('span',{text:'Todos os processos com destaque, sem a ementa.'})),
     h('button',{type:'button',role:'menuitem',onclick:function(){ closeMenu(); exportDestaques('geral'); }},h('b',{text:'Geral (todos os processos)'}),h('span',{text:'Todos os processos da pauta; sem destaque e não analisados aparecem no Resultado.'})),
     h('button',{type:'button',role:'menuitem',class:'msep',onclick:function(ev){ ev.stopPropagation(); menuPeriodo($('#dst')); }},h('b',{text:'Todas as pautas do período ▸'}),h('span',{text:'Um arquivo com as pautas dos três gabinetes do mesmo período, uma tabela por gabinete.'})),
-    h('button',{type:'button',role:'menuitem',class:'msep',onclick:function(){ closeMenu(); exportMarcasPeriodo(); }},h('b',{text:'Sustentações orais e impedimentos'}),h('span',{text:'Todas as pautas do período, uma tabela por gabinete, só com os processos marcados.'})));
+    h('button',{type:'button',role:'menuitem',class:'msep',onclick:function(){ closeMenu(); exportMarcasPeriodo(); }},h('b',{text:'Sustentações orais, impedimentos e oposições'}),h('span',{text:'Todas as pautas do período, uma tabela por gabinete, só com os processos marcados.'})));
   m.style.top=(r.bottom+6+window.scrollY)+'px'; m.style.right=Math.max(16,document.documentElement.clientWidth-r.right)+'px';
   document.body.append(m); m.querySelector('button').focus();
 });
@@ -1935,6 +1935,7 @@ function filtered(){
     if(mine&&S.filter==='aguardpos'&&!aguardaPosicao(p)) return;
     if(mine&&S.filter==='mantidos'&&!temMantido(p)) return;
     if(mine&&S.filter==='sustentacao'&&!(p.marcas&&p.marcas.sustentacao)) return;
+    if(mine&&S.filter==='oposicao'&&!(p.marcas&&p.marcas.oposicao)) return;
     if(mine&&S.filter==='impedimento'&&!temImpedimento(p)) return;
     if(mine&&S.filter==='anterior'&&!anterioresDe(p).length) return;
     if(mine&&S.filter==='acatado'&&!temSit(p,'acatado')) return;
@@ -1976,14 +1977,14 @@ function refreshSide(){
        ['acordo','Aguardando nossa concordância',ps.filter(function(p){return aguardaAcordo(p,S.me.gab);}).length],
        ['rever','Alterados após nossa análise',ps.filter(function(p){return alteradoApos(p.id,S.me.gab);}).length],
        ['alterados','Alterados',ps.filter(edited).length]])
-   .concat([['sustentacao','Sustentação oral',ps.filter(function(p){ return !!(p.marcas&&p.marcas.sustentacao); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length]])
+   .concat([['sustentacao','Sustentação oral',ps.filter(function(p){ return !!(p.marcas&&p.marcas.sustentacao); }).length],['oposicao','Oposição ao julgamento virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.oposicao); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length]])
    .concat(procsRetirados().length||S.filter==='retirados'?[['retirados','Retirados',procsRetirados().length]]:[])
    .forEach(function(c){ fl.push(c); });
   if(isSec()){   // Secretaria: só filtros de consulta
     var sust=function(p){ return !!(p.marcas&&p.marcas.sustentacao); };
     fl=[['todos','Todos',ps.length],['todosdest','Todos com destaque',ps.filter(comDestaque).length],['destaque','Aguardando resposta',ps.filter(semDecisao).length],
       ['acatado','Destaque acolhido',ps.filter(function(p){return temSit(p,'acatado');}).length],['parcial','Destaque parcialmente acolhido',ps.filter(function(p){return temSit(p,'parcial');}).length],['naoacatado','Destaque não acolhido',ps.filter(function(p){return temSit(p,'nao_acatado');}).length],
-      ['mantidos','Destaques mantidos',ps.filter(temMantido).length],['sustentacao','Sustentação oral',ps.filter(sust).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length],['alterados','Alterados',ps.filter(edited).length]]
+      ['mantidos','Destaques mantidos',ps.filter(temMantido).length],['sustentacao','Sustentação oral',ps.filter(sust).length],['oposicao','Oposição ao julgamento virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.oposicao); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length],['alterados','Alterados',ps.filter(edited).length]]
       .concat(procsRetirados().length||S.filter==='retirados'?[['retirados','Retirados',procsRetirados().length]]:[]);
   }
   var atual=fl.find(function(c){return c[0]===S.filter;})||fl[0];
