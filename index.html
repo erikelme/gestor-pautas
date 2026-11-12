@@ -477,7 +477,7 @@ function parseHeader(nodes){
   var meta={tribunal:'',orgao:'',relator:'',tipoSessao:'',dataSessao:'',titulo:''};
   lines.forEach(function(l){
     var ms=/^(Sess[ãa]o[^:]*?)\s*:\s*(\d{2}\/\d{2}\/\d{4})/i.exec(l);
-    if(ms){ meta.tipoSessao=ms[1]; meta.dataSessao=ms[2]; var mf=/\ba\s*(\d{2}\/\d{2}\/\d{4})/.exec(l.slice(ms[0].length)); if(mf) meta.dataFim=mf[1]; return; }
+    if(ms){ meta.tipoSessao=/extraordin/i.test(ms[1])?'Sessão Ampliada':ms[1]; meta.dataSessao=ms[2]; var mf=/\ba\s*(\d{2}\/\d{2}\/\d{4})/.exec(l.slice(ms[0].length)); if(mf) meta.dataFim=mf[1]; return; }
     if(!meta.tribunal&&/tribunal/i.test(l)){ meta.tribunal=l; return; }
     if(!meta.orgao&&/(turma|gab|plen|se[çc][ãa]o)/i.test(l)){ meta.orgao=l; return; }
     if(!meta.titulo&&/rela[çc][ãa]o|pauta/i.test(l)){ meta.titulo=l; return; }
