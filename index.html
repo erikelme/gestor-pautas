@@ -316,6 +316,14 @@ body.perfil-sec #up{display:none}
 .menu .pgab:hover{background:var(--accent-soft)}
 .menu .pgab.on{background:var(--accent);color:#fff}
 .menu .pgab.off{background:none}
+.selbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:8px}
+.selbar.on{flex-direction:column;align-items:stretch;padding:8px 10px;border:1px solid var(--accent);border-radius:7px;background:var(--accent-soft)}
+.selbar .selbtns{display:flex;flex-wrap:wrap;gap:6px}
+.selbar .hint{font-size:12px}
+.li:has(.lisel){position:relative}
+.li .lisel{position:absolute;left:6px;top:12px;width:16px;height:16px;margin:0;pointer-events:none}
+.li:has(.lisel){padding-left:28px}
+.li.picked{background:var(--accent-soft)}
 .setup{max-width:640px;margin:8vh auto;padding-inline:16px;line-height:1.6}
 .setup code{font-family:var(--mono);background:var(--sunk);padding:1px 5px;border-radius:4px}
 </style>
@@ -784,13 +792,13 @@ function cellParas(text,opts){
 }
 /* tabela de sustentações orais e impedimentos, uma por gabinete relator */
 async function buildMarcasDocx(meta,secoes){
-  var widths=[560,2750,2300,4450,1400,1500,2176];
+  var widths=[520,2750,2000,3700,1500,1350,1250,2066];
   var border='<w:tblBorders>'+['top','left','bottom','right','insideH','insideV'].map(function(b){return '<w:'+b+' w:val="single" w:sz="4" w:space="0" w:color="000000"/>';}).join('')+'</w:tblBorders>';
   function cell(w,inner,shade){ return '<w:tc><w:tcPr><w:tcW w:w="'+w+'" w:type="dxa"/>'+(shade?'<w:shd w:val="clear" w:color="auto" w:fill="E7ECEA"/>':'')+'</w:tcPr>'+inner+'</w:tc>'; }
-  var head='<w:tr><w:trPr><w:tblHeader/></w:trPr>'+['Ch','Processo','Classe','Partes','Sustentação oral','Op. julgamento virtual','Impedimento'].map(function(t,i){ return cell(widths[i],cellParas(t,{b:true,jc:'left'}),true); }).join('')+'</w:tr>';
+  var head='<w:tr><w:trPr><w:tblHeader/></w:trPr>'+['Ch','Processo','Classe','Partes','Sustentação oral','Op. julgamento virtual','Rec. da Virtual','Impedimento'].map(function(t,i){ return cell(widths[i],cellParas(t,{b:true,jc:'left'}),true); }).join('')+'</w:tr>';
   function tabela(ps){ return '<w:tbl><w:tblPr><w:tblW w:w="'+widths.reduce(function(a,b){return a+b;},0)+'" w:type="dxa"/><w:tblLayout w:type="fixed"/>'+border+'<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>'+widths.map(function(w){return '<w:gridCol w:w="'+w+'"/>';}).join('')+'</w:tblGrid>'+head+
     ps.map(function(p){ var ch=String(p.ordem==null?'':p.ordem); if(/^\d$/.test(ch)) ch='0'+ch;
-      return '<w:tr><w:trPr><w:cantSplit/></w:trPr>'+[ch,p.numero||'',p.classe||'',p.partes||'',p.sustentacao||'',p.oposicao||'',p.impedimento||''].map(function(t,i){ return cell(widths[i],cellParas(t,{jc:'left'})); }).join('')+'</w:tr>'; }).join('')+'</w:tbl><w:p/>'; }
+      return '<w:tr><w:trPr><w:cantSplit/></w:trPr>'+[ch,p.numero||'',p.classe||'',p.partes||'',p.sustentacao||'',p.oposicao||'',p.recvirtual||'',p.impedimento||''].map(function(t,i){ return cell(widths[i],cellParas(t,{jc:'left'})); }).join('')+'</w:tr>'; }).join('')+'</w:tbl><w:p/>'; }
   function par(t,sz,before){ return '<w:p><w:pPr><w:keepNext/><w:spacing w:before="'+(before||0)+'" w:after="160"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:sz w:val="'+sz+'"/></w:rPr><w:t xml:space="preserve">'+xesc(t)+'</w:t></w:r></w:p>'; }
   var titulo=['Sustentações orais, impedimentos e oposições – todas as pautas',meta.tipoSessao&&meta.dataSessao?meta.tipoSessao+' de '+(meta.periodo||meta.dataSessao):''].filter(Boolean).join(' – ');
   var body=par(titulo,22,0);
@@ -1392,6 +1400,7 @@ function stopPautaListeners(){ S.unsub.forEach(function(u){try{u();}catch(e){}})
 function openPauta(pid){
   Save.flush(); stopPautaListeners();
   Hist.commitAll(); Hist.base={}; Hist.open={};
+  S.selMode=false; S.selSet={};
   S.cur=pid; S.sel=null; S.procs={}; S.dest={}; S.obs={}; S.hist={}; S.anal={}; S.rasc={}; S.acordo={}; S.ant={}; S.antDest={}; try{ localStorage.setItem('gp:last',pid); }catch(e){}
   var base=db.collection('pautas').doc(pid), loaded={p:false};
   render();
@@ -1463,10 +1472,16 @@ async function importFile(file){
     for(var q=0;q<np;q++) writes.push([ref.collection('arquivoPdf').doc(String(q)),{i:q,n:np,b64:pdfB64.slice(q*CH,(q+1)*CH)}]);
     try{ S.others={}; await loadOthers(); }catch(e){}
     var dkNova=dateKey({meta:r.meta});
+    if(!ehVirtual(r.meta)) r.processos.forEach(function(p){ var k=numKey(p.numero); if(!k) return;   // sessão não virtual: marca "Recebido da Virtual" se veio de pauta virtual anterior
+      var vs=[]; S.pautas.forEach(function(x){ if(x.meta&&ehVirtual(x.meta)&&dateKey(x)&&dateKey(x)<dkNova&&procsDaPauta(x.id).some(function(q){ return numKey(q.numero)===k; })) vs.push(x); });
+      vs.sort(function(a,b){ return dateKey(b)-dateKey(a); });
+      if(vs.length) p._recVirtual=antLabel(vs[0]); });
     r.processos.forEach(function(p){ var k=numKey(p.numero); if(!k) return;
       var cand=[]; S.pautas.forEach(function(x){ if(dateKey(x)&&dateKey(x)<dkNova) procsDaPauta(x.id).forEach(function(q){ if(numKey(q.numero)===k&&marcasDe(q).length) cand.push({pa:x,proc:q}); }); });
       cand.sort(function(a,b){ return dateKey(b.pa)-dateKey(a.pa); });
       if(cand.length){ p.marcas=clone(cand[0].proc.marcas); p.marcasOrigem=antLabel(cand[0].pa); } });
+    r.processos.forEach(function(p){ if(p.marcas) delete p.marcas.recvirtual;   // "Recebido da Virtual" não é herdado: vale só para esta pauta
+      if(p._recVirtual){ p.marcas=Object.assign({},p.marcas||{},{recvirtual:true}); p.recVirtualDe=p._recVirtual; } delete p._recVirtual; });
     r.processos.forEach(function(p,k){ p.pos=k; p.resultado=''; p.relator=''; writes.push([ref.collection('processos').doc('p'+String(k).padStart(3,'0')),p]); });
     for(var j=0;j<writes.length;j+=200){ var bt=db.batch(); writes.slice(j,j+200).forEach(function(w){ bt.set(w[0],w[1]); }); await bt.commit(); }
     openPauta(ref.id);
@@ -1504,7 +1519,7 @@ async function originalBytes(pid){
 /* ═════════ HISTÓRICO DE ALTERAÇÕES ═════════ */
 var CAMPOS=[['numero','Número do processo'],['ordem','Chamada'],['classe','Classe processual'],['codClasse','Código da classe'],['situacao','Situação na pauta'],['link','Link do processo'],['partes','Partes'],['advogados','Advogados'],['ementa','Ementa'],['outros','Outras informações'],['resultado','Resultado do julgamento'],['marcas','Marcações'],['processo','Processo'],['retirada','Retirada de pauta']];
 function campoLabel(c){ var x=CAMPOS.find(function(k){return k[0]===c;}); return x?x[1]:c; }
-var MARCAS=[['sustentacao','Pedido de sustentação oral','Sustentação oral'],['oposicao','Oposição ao julgamento virtual','Oposição ao virtual'],['imp_gab25','Impedimento – Des. Ivan Lira','Impedido: IL'],['imp_gab26','Impedimento – Des. Magnus Delgado','Impedido: MD'],['imp_gab27','Impedimento – Desa. Isabelle Marne','Impedido: IM']];
+var MARCAS=[['sustentacao','Pedido de sustentação oral','Sustentação oral'],['oposicao','Oposição ao julgamento virtual','Oposição ao virtual'],['recvirtual','Recebido da Virtual','Recebido da Virtual'],['imp_gab25','Impedimento – Des. Ivan Lira','Impedido: IL'],['imp_gab26','Impedimento – Des. Magnus Delgado','Impedido: MD'],['imp_gab27','Impedimento – Desa. Isabelle Marne','Impedido: IM']];
 function marcasDe(p){ var m=p&&p.marcas||{}; return MARCAS.filter(function(x){ return !!m[x[0]]; }); }
 function marcasTxt(p){ return marcasDe(p).map(function(x){ return x[2]; }).join(' · '); }
 function temImpedimento(p){ return marcasDe(p).some(function(x){ return x[0].indexOf('imp_')===0; }); }
@@ -1703,7 +1718,7 @@ async function exportMarcasPeriodo(){
       var lista=procs.filter(function(p){ return marcasDe(p).length; }).map(function(p){
         var m=p.marcas||{};
         return {ordem:p.ordem,numero:p.numero,classe:p.classe,partes:(p.partes||[]).map(function(q){ return q.polo+': '+q.nome; }).join('\n'),
-          sustentacao:m.sustentacao?'Sim':'',oposicao:m.oposicao?'Sim':'',impedimento:MARCAS.filter(function(k){ return k[0].indexOf('imp_')===0&&m[k[0]]; }).map(function(k){ return k[1].replace('Impedimento – ',''); }).join('\n')}; });
+          sustentacao:m.sustentacao?'Sim':'',oposicao:m.oposicao?'Sim':'',recvirtual:m.recvirtual?'Sim':'',impedimento:MARCAS.filter(function(k){ return k[0].indexOf('imp_')===0&&m[k[0]]; }).map(function(k){ return k[1].replace('Impedimento – ',''); }).join('\n')}; });
       secoes.push({titulo:'Pauta do '+(g?'Gab '+g.num+' – '+g.curto:'gabinete não identificado'),processos:lista,vazio:'Nenhum processo com sustentação oral, impedimento ou oposição ao julgamento virtual.'});
     }
     var falta=GABS.filter(function(g){ return !mesmo.some(function(x){ return x.gabinete===g.id; }); });
@@ -1936,6 +1951,7 @@ function filtered(){
     if(mine&&S.filter==='mantidos'&&!temMantido(p)) return;
     if(mine&&S.filter==='sustentacao'&&!(p.marcas&&p.marcas.sustentacao)) return;
     if(mine&&S.filter==='oposicao'&&!(p.marcas&&p.marcas.oposicao)) return;
+    if(mine&&S.filter==='recvirtual'&&!(p.marcas&&p.marcas.recvirtual)) return;
     if(mine&&S.filter==='impedimento'&&!temImpedimento(p)) return;
     if(mine&&S.filter==='anterior'&&!anterioresDe(p).length) return;
     if(mine&&S.filter==='acatado'&&!temSit(p,'acatado')) return;
@@ -1977,14 +1993,14 @@ function refreshSide(){
        ['acordo','Aguardando nossa concordância',ps.filter(function(p){return aguardaAcordo(p,S.me.gab);}).length],
        ['rever','Alterados após nossa análise',ps.filter(function(p){return alteradoApos(p.id,S.me.gab);}).length],
        ['alterados','Alterados',ps.filter(edited).length]])
-   .concat([['sustentacao','Sustentação oral',ps.filter(function(p){ return !!(p.marcas&&p.marcas.sustentacao); }).length],['oposicao','Oposição ao julgamento virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.oposicao); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length]])
+   .concat([['sustentacao','Sustentação oral',ps.filter(function(p){ return !!(p.marcas&&p.marcas.sustentacao); }).length],['oposicao','Oposição ao julgamento virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.oposicao); }).length],['recvirtual','Recebido da Virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.recvirtual); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length]])
    .concat(procsRetirados().length||S.filter==='retirados'?[['retirados','Retirados',procsRetirados().length]]:[])
    .forEach(function(c){ fl.push(c); });
   if(isSec()){   // Secretaria: só filtros de consulta
     var sust=function(p){ return !!(p.marcas&&p.marcas.sustentacao); };
     fl=[['todos','Todos',ps.length],['todosdest','Todos com destaque',ps.filter(comDestaque).length],['destaque','Aguardando resposta',ps.filter(semDecisao).length],
       ['acatado','Destaque acolhido',ps.filter(function(p){return temSit(p,'acatado');}).length],['parcial','Destaque parcialmente acolhido',ps.filter(function(p){return temSit(p,'parcial');}).length],['naoacatado','Destaque não acolhido',ps.filter(function(p){return temSit(p,'nao_acatado');}).length],
-      ['mantidos','Destaques mantidos',ps.filter(temMantido).length],['sustentacao','Sustentação oral',ps.filter(sust).length],['oposicao','Oposição ao julgamento virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.oposicao); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length],['alterados','Alterados',ps.filter(edited).length]]
+      ['mantidos','Destaques mantidos',ps.filter(temMantido).length],['sustentacao','Sustentação oral',ps.filter(sust).length],['oposicao','Oposição ao julgamento virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.oposicao); }).length],['recvirtual','Recebido da Virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.recvirtual); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length],['alterados','Alterados',ps.filter(edited).length]]
       .concat(procsRetirados().length||S.filter==='retirados'?[['retirados','Retirados',procsRetirados().length]]:[]);
   }
   var atual=fl.find(function(c){return c[0]===S.filter;})||fl[0];
@@ -1993,7 +2009,48 @@ function refreshSide(){
   chips.append(tog);
   if(S.filtersOpen) chips.append(h('div',{class:'flist',role:'listbox','aria-label':'Filtros'},fl.map(function(c){
     return h('button',{type:'button',role:'option','aria-selected':String(S.filter===c[0]),class:'fopt'+(S.filter===c[0]?' on':''),onclick:function(){ S.filter=c[0]; S.filtersOpen=false; refreshSide(); }},h('span',{text:c[1]}),h('span',{class:'mono',text:String(c[2])})); })));
+  var sb=selBar(); if(sb) chips.append(sb);
   renderList();
+}
+/* ─── seleção de vários processos para marcar "sem destaque" (gabinetes revisores) ─── */
+function podeSelecionar(){ var pa=curPauta(); return !!(pa&&S.me&&!isSec()&&!isRelator(pa)); }
+function selIds(){ return Object.keys(S.selSet||{}).filter(function(id){ return S.selSet[id]&&S.procs[id]; }); }
+function semElegivel(p){ return !retirado(p)&&analiseDe(p.id,S.me.gab)!=='destacado'&&!Rasc.minhos(p.id).length; }
+function temSemMarcado(p){ var mk=S.anal[p.id+'__'+S.me.gab]; return !!(mk&&mk.status==='sem_destaque'); }
+function selBar(){
+  if(!podeSelecionar()) return null;
+  if(!S.selMode) return h('div',{class:'selbar'},h('button',{class:'btn sm',type:'button',onclick:function(){ S.selMode=true; S.selSet={}; refreshSide(); }},'☑ Selecionar processos'),
+    h('span',{class:'hint',text:'para marcar “sem destaque” em vários de uma vez'}));
+  var ids=selIds(), ps=ids.map(function(id){ return S.procs[id]; });
+  var marcar=ps.filter(function(p){ return semElegivel(p)&&!temSemMarcado(p); }), desfazer=ps.filter(temSemMarcado), fora=ps.filter(function(p){ return !semElegivel(p); });
+  var vis=filtered().filter(function(it){ return it.p._pauta===undefined&&!retirado(it.p); }).map(function(it){ return it.p.id; });
+  var todos=vis.length&&vis.every(function(id){ return S.selSet[id]; });
+  var bTodos=h('button',{class:'btn sm',type:'button',onclick:function(){ vis.forEach(function(id){ if(todos) delete S.selSet[id]; else S.selSet[id]=true; }); refreshSide(); }},todos?'Limpar seleção':'Selecionar todos ('+vis.length+')');
+  function acao(rotulo,lista,fn){
+    var b=h('button',{class:'btn sm primary',type:'button',disabled:lista.length?null:true},rotulo+' ('+lista.length+')'), arm=false, t;
+    b.addEventListener('click',async function(){
+      if(!arm){ arm=true; b.textContent='Confirmar: '+rotulo.toLowerCase()+' em '+lista.length+(lista.length===1?' processo':' processos'); t=setTimeout(function(){ arm=false; b.textContent=rotulo+' ('+lista.length+')'; },5000); return; }
+      clearTimeout(t); b.disabled=true;
+      try{ await fn(lista); S.selSet={}; S.selMode=false; refreshSide(); renderCounts(); if(S.sel) refreshDestaques(true); }
+      catch(e){ toast(errMsg(e),true); b.disabled=false; }
+    });
+    return b;
+  }
+  var bMarcar=acao('Marcar “sem destaque”',marcar,async function(lista){
+    var base=db.collection('pautas').doc(S.cur).collection('analises'), t=now();
+    for(var i=0;i<lista.length;i+=400){ var bt=db.batch(); lista.slice(i,i+400).forEach(function(p){ bt.set(base.doc(p.id+'__'+S.me.gab),{proc:p.id,gab:S.me.gab,status:'sem_destaque',por:S.me.uid,porNome:S.me.nome,em:t}); }); await bt.commit(); }
+    toast('“Sem destaque” marcado em '+lista.length+(lista.length===1?' processo.':' processos.')+(fora.length?' '+fora.length+(fora.length===1?' ficou':' ficaram')+' de fora (destaque ou rascunho do seu gabinete, ou retirado de pauta).':''));
+  });
+  var bDesf=acao('Desfazer “sem destaque”',desfazer,async function(lista){
+    var base=db.collection('pautas').doc(S.cur).collection('analises');
+    for(var i=0;i<lista.length;i+=400){ var bt=db.batch(); lista.slice(i,i+400).forEach(function(p){ bt.delete(base.doc(p.id+'__'+S.me.gab)); }); await bt.commit(); }
+    toast('“Sem destaque” desfeito em '+lista.length+(lista.length===1?' processo.':' processos.'));
+  });
+  bDesf.classList.remove('primary');
+  return h('div',{class:'selbar on'},
+    h('div',{class:'selinfo'},h('b',{text:ids.length+(ids.length===1?' selecionado':' selecionados')}),
+      fora.length?h('span',{class:'hint',text:' · '+fora.length+' não pode'+(fora.length===1?'':'m')+' receber “sem destaque”'}):null),
+    h('div',{class:'selbtns'},bTodos,bMarcar,bDesf,h('button',{class:'btn sm ghost',type:'button',onclick:function(){ S.selMode=false; S.selSet={}; refreshSide(); }},'Cancelar')));
 }
 function renderList(){
   var list=$('#list'); if(!list) return; var st=list.scrollTop; list.innerHTML='';
@@ -2012,14 +2069,17 @@ function renderList(){
       !other&&!isRelator()&&alteradoApos(p.id,S.me.gab)?h('span',{class:'pill rev',text:'Alterado após análise',title:'O gabinete relator alterou este processo depois da análise do seu gabinete'}):(!other&&edited(p)?h('span',{class:'pill ed',text:'Alterado',title:'Difere do arquivo enviado'}):null),
       other?null:outrosGabs().filter(function(g){ var a=analiseDe(p.id,g.id); return (a==='sem'||a==='acordo'); }).map(function(g){ var a=analiseDe(p.id,g.id); var at=a==='acordo'&&acordoTipo(p.id,g.id); return h('span',{class:'pill semd',text:g.sigla+(a==='acordo'?(at==='resposta'?' de acordo c/ resposta':' de acordo c/ destaque'):' ✓'),title:g.nome+(a==='acordo'?(at==='resposta'?' · de acordo com a resposta':' · de acordo com o destaque'):' · analisado, sem destaque')}); }),
       other?null:destOf(p.id).map(function(d){ var g=gabById(d.gab); return h('span',{class:'pill '+sitCls(d.situacao),text:g?g.sigla:'?',title:(g?g.nome:'')+' · '+sitLabel(d.situacao)+(d.autorNome?' · '+d.autorNome:'')}); }));
-    var el=h('div',{class:'li'+(p.id===S.sel&&!other?' on':''),role:'option',tabindex:'0','aria-selected':p.id===S.sel&&!other?'true':'false','data-id':p.id},
+    var selOk=S.selMode&&!other&&!retirado(p), marcado=selOk&&!!S.selSet[p.id];
+    var el=h('div',{class:'li'+(p.id===S.sel&&!other?' on':'')+(marcado?' picked':''),role:'option',tabindex:'0','aria-selected':p.id===S.sel&&!other?'true':'false','data-id':p.id},
+      selOk?h('input',{type:'checkbox',class:'lisel',checked:marcado?true:null,'aria-label':'Selecionar '+p.numero,tabindex:'-1'}):null,
       h('span',{class:'ord',text:String(p.ordem)}),
       h('span',{class:'num'},h('span',{text:p.numero})),
       h('span',{class:'cls',text:(p.classe||'')+(pa?' · pauta de '+(periodo(pa.meta,true)||'')+' (Gab '+((gabById(pa.gabinete)||{}).num||'?')+')':'')}),
       h('span',{class:'who',text:partiesLabel(p)}),
       flags.childNodes.length?flags:null,
       m.label&&S.q?h('span',{class:'snip'},h('b',{text:m.label+': '}),marked(m.text,term)):null);
-    function go(){ if(other){ var target=p.id; openPauta(p._pauta); var iv=setInterval(function(){ if(S.procs[target]){ clearInterval(iv); select(target); } },150); setTimeout(function(){clearInterval(iv);},5000); } else select(p.id); }
+    function go(){ if(selOk){ if(S.selSet[p.id]) delete S.selSet[p.id]; else S.selSet[p.id]=true; refreshSide(); return; }
+      if(other){ var target=p.id; openPauta(p._pauta); var iv=setInterval(function(){ if(S.procs[target]){ clearInterval(iv); select(target); } },150); setTimeout(function(){clearInterval(iv);},5000); } else select(p.id); }
     el.addEventListener('click',go); el.addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); go(); }});
     list.append(el);
   });
@@ -2230,6 +2290,7 @@ function renderForm(){
     cb.addEventListener('change',function(){ p.marcas=Object.assign({},p.marcas||{}); p.marcas[x[0]]=cb.checked; changed(p); Hist.commit(p.id); });
     return h('label',{class:'mrc'},cb,x[1]); }));
   var marcSec=h('div',{class:'dsub'},h('h3',null,'Marcações',h('span',{class:'note',text:ro&&!isSec()?'Definidas pelo gabinete relator ou pela Secretaria':'Valem na hora para os três gabinetes'})),marcBox,
+    p.recVirtualDe&&p.marcas&&p.marcas.recvirtual?h('div',{class:'hint',style:'margin-top:6px',text:'“Recebido da Virtual” marcado automaticamente: o processo esteve na pauta virtual de '+p.recVirtualDe+'.'}):null,
     p.marcasOrigem?h('div',{class:'hint',style:'margin-top:6px',text:'Trazidas automaticamente da pauta de '+p.marcasOrigem+'. Confira e ajuste se preciso.'}):null);
   dados.append(h('div',{class:'bd'},grid0,marcSec,sub(partes,'Partes'),sub(advs,'Advogados'),sub(outros,'Outras informações')));
   collapsible(dados,'dados',p); collapsible(ementa,'ementa',p); collapsible(ctrl,'resultado',p);
