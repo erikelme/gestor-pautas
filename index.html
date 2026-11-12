@@ -1250,7 +1250,7 @@ function classificar(){
   var vAnd=gl.filter(function(g){ return g.virtual&&g.ini&&g.ini<=hoje&&hoje<g.fim; });
   var limite=vAnd.length?Math.max.apply(null,vAnd.map(function(g){return g.fim;})):keyOf(addDias(String(hoje).replace(/(\d{4})(\d{2})(\d{2})/,'$3/$2/$1'),7));
   var ords=gl.filter(function(g){ return !g.virtual&&g.ini>=hoje&&g.ini<=limite; }).sort(function(a,b){ return a.ini-b.ini; });
-  var ordAnd=ords.length?ords.filter(function(g){ return g.ini===ords[0].ini; }):[];
+  var ordAnd=ords;
   var r={andamento:[],futuras:[],anteriores:[]};
   gl.forEach(function(g){
     if(vAnd.indexOf(g)>=0||ordAnd.indexOf(g)>=0) r.andamento.push(g);
