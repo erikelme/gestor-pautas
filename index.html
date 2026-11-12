@@ -795,7 +795,7 @@ async function buildMarcasDocx(meta,secoes){
   var widths=[520,2750,2000,3700,1500,1350,1250,2066];
   var border='<w:tblBorders>'+['top','left','bottom','right','insideH','insideV'].map(function(b){return '<w:'+b+' w:val="single" w:sz="4" w:space="0" w:color="000000"/>';}).join('')+'</w:tblBorders>';
   function cell(w,inner,shade){ return '<w:tc><w:tcPr><w:tcW w:w="'+w+'" w:type="dxa"/>'+(shade?'<w:shd w:val="clear" w:color="auto" w:fill="E7ECEA"/>':'')+'</w:tcPr>'+inner+'</w:tc>'; }
-  var head='<w:tr><w:trPr><w:tblHeader/></w:trPr>'+['Ch','Processo','Classe','Partes','Sustentação oral','Op. julgamento virtual','Rec. da Virtual','Impedimento'].map(function(t,i){ return cell(widths[i],cellParas(t,{b:true,jc:'left'}),true); }).join('')+'</w:tr>';
+  var head='<w:tr><w:trPr><w:tblHeader/></w:trPr>'+['Ch','Processo','Classe','Partes','Sustentação oral','Op. julgamento virtual','Div. Sessão Virtual','Impedimento'].map(function(t,i){ return cell(widths[i],cellParas(t,{b:true,jc:'left'}),true); }).join('')+'</w:tr>';
   function tabela(ps){ return '<w:tbl><w:tblPr><w:tblW w:w="'+widths.reduce(function(a,b){return a+b;},0)+'" w:type="dxa"/><w:tblLayout w:type="fixed"/>'+border+'<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>'+widths.map(function(w){return '<w:gridCol w:w="'+w+'"/>';}).join('')+'</w:tblGrid>'+head+
     ps.map(function(p){ var ch=String(p.ordem==null?'':p.ordem); if(/^\d$/.test(ch)) ch='0'+ch;
       return '<w:tr><w:trPr><w:cantSplit/></w:trPr>'+[ch,p.numero||'',p.classe||'',p.partes||'',p.sustentacao||'',p.oposicao||'',p.recvirtual||'',p.impedimento||''].map(function(t,i){ return cell(widths[i],cellParas(t,{jc:'left'})); }).join('')+'</w:tr>'; }).join('')+'</w:tbl><w:p/>'; }
@@ -1472,7 +1472,7 @@ async function importFile(file){
     for(var q=0;q<np;q++) writes.push([ref.collection('arquivoPdf').doc(String(q)),{i:q,n:np,b64:pdfB64.slice(q*CH,(q+1)*CH)}]);
     try{ S.others={}; await loadOthers(); }catch(e){}
     var dkNova=dateKey({meta:r.meta});
-    if(!ehVirtual(r.meta)) r.processos.forEach(function(p){ var k=numKey(p.numero); if(!k) return;   // sessão não virtual: marca "Recebido da Virtual" se veio de pauta virtual anterior
+    if(!ehVirtual(r.meta)) r.processos.forEach(function(p){ var k=numKey(p.numero); if(!k) return;   // sessão não virtual: marca "Divergência da Sessão Virtual" se veio de pauta virtual anterior
       var vs=[]; S.pautas.forEach(function(x){ if(x.meta&&ehVirtual(x.meta)&&dateKey(x)&&dateKey(x)<dkNova&&procsDaPauta(x.id).some(function(q){ return numKey(q.numero)===k; })) vs.push(x); });
       vs.sort(function(a,b){ return dateKey(b)-dateKey(a); });
       if(vs.length) p._recVirtual=antLabel(vs[0]); });
@@ -1480,7 +1480,7 @@ async function importFile(file){
       var cand=[]; S.pautas.forEach(function(x){ if(dateKey(x)&&dateKey(x)<dkNova) procsDaPauta(x.id).forEach(function(q){ if(numKey(q.numero)===k&&marcasDe(q).length) cand.push({pa:x,proc:q}); }); });
       cand.sort(function(a,b){ return dateKey(b.pa)-dateKey(a.pa); });
       if(cand.length){ p.marcas=clone(cand[0].proc.marcas); p.marcasOrigem=antLabel(cand[0].pa); } });
-    r.processos.forEach(function(p){ if(p.marcas) delete p.marcas.recvirtual;   // "Recebido da Virtual" não é herdado: vale só para esta pauta
+    r.processos.forEach(function(p){ if(p.marcas) delete p.marcas.recvirtual;   // "Divergência da Sessão Virtual" não é herdado: vale só para esta pauta
       if(p._recVirtual){ p.marcas=Object.assign({},p.marcas||{},{recvirtual:true}); p.recVirtualDe=p._recVirtual; } delete p._recVirtual; });
     r.processos.forEach(function(p,k){ p.pos=k; p.resultado=''; p.relator=''; writes.push([ref.collection('processos').doc('p'+String(k).padStart(3,'0')),p]); });
     for(var j=0;j<writes.length;j+=200){ var bt=db.batch(); writes.slice(j,j+200).forEach(function(w){ bt.set(w[0],w[1]); }); await bt.commit(); }
@@ -1519,7 +1519,7 @@ async function originalBytes(pid){
 /* ═════════ HISTÓRICO DE ALTERAÇÕES ═════════ */
 var CAMPOS=[['numero','Número do processo'],['ordem','Chamada'],['classe','Classe processual'],['codClasse','Código da classe'],['situacao','Situação na pauta'],['link','Link do processo'],['partes','Partes'],['advogados','Advogados'],['ementa','Ementa'],['outros','Outras informações'],['resultado','Resultado do julgamento'],['marcas','Marcações'],['processo','Processo'],['retirada','Retirada de pauta']];
 function campoLabel(c){ var x=CAMPOS.find(function(k){return k[0]===c;}); return x?x[1]:c; }
-var MARCAS=[['sustentacao','Pedido de sustentação oral','Sustentação oral'],['oposicao','Oposição ao julgamento virtual','Oposição ao virtual'],['recvirtual','Recebido da Virtual','Recebido da Virtual'],['imp_gab25','Impedimento – Des. Ivan Lira','Impedido: IL'],['imp_gab26','Impedimento – Des. Magnus Delgado','Impedido: MD'],['imp_gab27','Impedimento – Desa. Isabelle Marne','Impedido: IM']];
+var MARCAS=[['sustentacao','Pedido de sustentação oral','Sustentação oral'],['oposicao','Oposição ao julgamento virtual','Oposição ao virtual'],['recvirtual','Divergência da Sessão Virtual','Divergência da Sessão Virtual'],['imp_gab25','Impedimento – Des. Ivan Lira','Impedido: IL'],['imp_gab26','Impedimento – Des. Magnus Delgado','Impedido: MD'],['imp_gab27','Impedimento – Desa. Isabelle Marne','Impedido: IM']];
 function marcasDe(p){ var m=p&&p.marcas||{}; return MARCAS.filter(function(x){ return !!m[x[0]]; }); }
 function marcasTxt(p){ return marcasDe(p).map(function(x){ return x[2]; }).join(' · '); }
 function temImpedimento(p){ return marcasDe(p).some(function(x){ return x[0].indexOf('imp_')===0; }); }
@@ -1993,14 +1993,14 @@ function refreshSide(){
        ['acordo','Aguardando nossa concordância',ps.filter(function(p){return aguardaAcordo(p,S.me.gab);}).length],
        ['rever','Alterados após nossa análise',ps.filter(function(p){return alteradoApos(p.id,S.me.gab);}).length],
        ['alterados','Alterados',ps.filter(edited).length]])
-   .concat([['sustentacao','Sustentação oral',ps.filter(function(p){ return !!(p.marcas&&p.marcas.sustentacao); }).length],['oposicao','Oposição ao julgamento virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.oposicao); }).length],['recvirtual','Recebido da Virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.recvirtual); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length]])
+   .concat([['sustentacao','Sustentação oral',ps.filter(function(p){ return !!(p.marcas&&p.marcas.sustentacao); }).length],['oposicao','Oposição ao julgamento virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.oposicao); }).length],['recvirtual','Divergência da Sessão Virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.recvirtual); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length]])
    .concat(procsRetirados().length||S.filter==='retirados'?[['retirados','Retirados',procsRetirados().length]]:[])
    .forEach(function(c){ fl.push(c); });
   if(isSec()){   // Secretaria: só filtros de consulta
     var sust=function(p){ return !!(p.marcas&&p.marcas.sustentacao); };
     fl=[['todos','Todos',ps.length],['todosdest','Todos com destaque',ps.filter(comDestaque).length],['destaque','Aguardando resposta',ps.filter(semDecisao).length],
       ['acatado','Destaque acolhido',ps.filter(function(p){return temSit(p,'acatado');}).length],['parcial','Destaque parcialmente acolhido',ps.filter(function(p){return temSit(p,'parcial');}).length],['naoacatado','Destaque não acolhido',ps.filter(function(p){return temSit(p,'nao_acatado');}).length],
-      ['mantidos','Destaques mantidos',ps.filter(temMantido).length],['sustentacao','Sustentação oral',ps.filter(sust).length],['oposicao','Oposição ao julgamento virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.oposicao); }).length],['recvirtual','Recebido da Virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.recvirtual); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length],['alterados','Alterados',ps.filter(edited).length]]
+      ['mantidos','Destaques mantidos',ps.filter(temMantido).length],['sustentacao','Sustentação oral',ps.filter(sust).length],['oposicao','Oposição ao julgamento virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.oposicao); }).length],['recvirtual','Divergência da Sessão Virtual',ps.filter(function(p){ return !!(p.marcas&&p.marcas.recvirtual); }).length],['impedimento','Impedimento',ps.filter(temImpedimento).length],['anterior','Pauta anterior',ps.filter(function(p){ return anterioresDe(p).length>0; }).length],['alterados','Alterados',ps.filter(edited).length]]
       .concat(procsRetirados().length||S.filter==='retirados'?[['retirados','Retirados',procsRetirados().length]]:[]);
   }
   var atual=fl.find(function(c){return c[0]===S.filter;})||fl[0];
@@ -2290,7 +2290,7 @@ function renderForm(){
     cb.addEventListener('change',function(){ p.marcas=Object.assign({},p.marcas||{}); p.marcas[x[0]]=cb.checked; changed(p); Hist.commit(p.id); });
     return h('label',{class:'mrc'},cb,x[1]); }));
   var marcSec=h('div',{class:'dsub'},h('h3',null,'Marcações',h('span',{class:'note',text:ro&&!isSec()?'Definidas pelo gabinete relator ou pela Secretaria':'Valem na hora para os três gabinetes'})),marcBox,
-    p.recVirtualDe&&p.marcas&&p.marcas.recvirtual?h('div',{class:'hint',style:'margin-top:6px',text:'“Recebido da Virtual” marcado automaticamente: o processo esteve na pauta virtual de '+p.recVirtualDe+'.'}):null,
+    p.recVirtualDe&&p.marcas&&p.marcas.recvirtual?h('div',{class:'hint',style:'margin-top:6px',text:'“Divergência da Sessão Virtual” marcada automaticamente: o processo esteve na pauta virtual de '+p.recVirtualDe+'.'}):null,
     p.marcasOrigem?h('div',{class:'hint',style:'margin-top:6px',text:'Trazidas automaticamente da pauta de '+p.marcasOrigem+'. Confira e ajuste se preciso.'}):null);
   dados.append(h('div',{class:'bd'},grid0,marcSec,sub(partes,'Partes'),sub(advs,'Advogados'),sub(outros,'Outras informações')));
   collapsible(dados,'dados',p); collapsible(ementa,'ementa',p); collapsible(ctrl,'resultado',p);
