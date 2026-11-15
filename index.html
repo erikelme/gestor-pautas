@@ -55,6 +55,23 @@ button,input,select,textarea{font:inherit;color:inherit}
 .btn[disabled]{opacity:.55;cursor:progress}
 .btn.sm{height:28px;padding:0 9px;font-size:12.5px}
 select.pick{height:34px;max-width:min(100%,420px);min-width:0;border:1px solid var(--line);border-radius:6px;background:var(--panel);padding:0 8px}
+.pickw{position:relative;min-width:0;max-width:min(100%,440px);display:inline-flex}
+.pickb{height:34px;min-width:0;max-width:100%;display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:inherit;padding:0 8px 0 10px;cursor:pointer;font:inherit;text-align:left}
+.pickb:hover{border-color:var(--muted)}
+.pickb>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.pickb svg{width:16px;height:16px;flex:none;color:var(--muted)}
+.pickpop{position:absolute;top:calc(100% + 4px);left:0;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.18);min-width:100%;width:max-content;max-width:min(calc(100vw - 32px),540px);max-height:min(70vh,560px);overflow:auto;padding:4px 0}
+.pickpop .pg-h{font-weight:700;font-size:13px;padding:7px 12px 3px}
+.pickpop button{display:flex;align-items:center;gap:6px;width:100%;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;padding:5px 12px 5px 26px;white-space:normal}
+.pickpop button:hover,.pickpop button:focus-visible{background:var(--accent-soft);outline:none}
+.pickpop .pg-o[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
+.pickpop .pg-t{font-weight:700;font-size:13px;padding:7px 12px 3px}
+.pickpop .pg-t .car,.pickpop .pg-w .car{display:inline-block;width:12px;flex:none;color:var(--muted)}
+.pickpop .pg-w{font-weight:600;padding-left:22px}
+.pickpop .pg-w .n,.pickpop .pg-t .n{font-weight:400;color:var(--muted)}
+.pickpop .pg-in{padding-left:44px}
+.pickpop .pg-more{color:var(--accent);padding-left:22px}
+.pickpop .pg-none{color:var(--muted);padding:4px 12px 4px 26px;font-size:13px}
 .save{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
 .save.pending .dot{background:var(--warn)} .save.error .dot{background:var(--bad)}
@@ -334,8 +351,8 @@ body.perfil-sec #up{display:none}
   <div class="bar" id="bar">
     <div class="bar-row">
       <span class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 21h14M4 8h16M7 8l-3 6a3 3 0 0 0 6 0zM17 8l-3 6a3 3 0 0 0 6 0zM12 3l-6 5M12 3l6 5"/></svg>Gestor de Pautas</span>
-      <label class="vh" for="pick">Pauta aberta</label>
-      <select class="pick" id="pick" hidden></select>
+      <span class="pickw" id="pickw" hidden><button class="pickb" id="pickb" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Pauta aberta"><span id="pickt"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button><div class="pickpop" id="pickpop" role="listbox" aria-label="Pautas" hidden></div></span>
+      <select class="pick" id="pick" hidden aria-hidden="true" tabindex="-1"></select>
       <span class="grow"></span>
       <span class="save" id="save" aria-live="polite"><span class="dot"></span><span id="saveTxt">Conectando…</span></span>
       <input type="file" id="file" class="vh" accept=".docx,.pdf">
@@ -1782,7 +1799,9 @@ function renderTop(){
     if(!n) og.append(h('option',{disabled:true,text:'(nenhuma)'}));
     pick.append(og); });
   if(ocultas) pick.append(h('option',{value:'__antigas',text:'Mostrar mais antigas… ('+ocultas+')'}));
-  pick.hidden=!S.pautas.length; if(pa) pick.value=pa.id; var nav=$('#pnav'); if(nav) nav.hidden=true;
+  pick.hidden=true; if(pa) pick.value=pa.id; var nav=$('#pnav'); if(nav) nav.hidden=true;
+  $('#pickw').hidden=!S.pautas.length; $('#pickt').textContent=pa?pautaLabel(pa):'Escolha uma pauta'; $('#pickb').title=pa?pautaLabel(pa):'';
+  S.pickCl=cl; S.pickLim=lim; if(!$('#pickpop').hidden) renderPickPop();
   $('#dl').hidden=$('#dst').hidden=$('#sess').hidden=!pa;
   $('#vpdf').hidden=!pa;
   if(pa){ $('#vpdf').lastChild.textContent=pa.fonte==='pdf'?'Ver PDF original':'Baixar Word original'; $('#vpdf').title=pa.fonte==='pdf'?'Abrir o PDF enviado':'Baixar o Word enviado, sem alterações'; }
@@ -1820,6 +1839,68 @@ document.querySelectorAll('[data-meta]').forEach(function(inp){
   inp.addEventListener('change',function(){ if(inp.dataset.meta==='dataSessao'||inp.dataset.meta==='tipoSessao'){ renderTop(); if(S.sel) renderForm(); } });
 });
 $('#m_gab').addEventListener('change',async function(e){ var pa=curPauta(); if(!pa||!(pa.gabAuto===true&&pa.criadoPor===S.me.uid)||!e.target.value) return; pa.gabinete=e.target.value; pa.gabAuto=false; savePauta(pa); await Save.flush(); toast('Gabinete relator definido.'); renderTop(); renderMain(); });
+/* seletor de pautas com grupos recolhíveis (Anteriores, por semana) */
+function semanasAnt(gl){
+  var vs=gl.filter(function(g){ return g.virtual; }), map={}, out=[];
+  gl.forEach(function(g){
+    var w=g.virtual?g:(vs.filter(function(v){ return v.ini<g.ini&&g.ini<=v.fim; }).sort(function(a,b){ return b.ini-a.ini; })[0]||vs.filter(function(v){ return v.ini===g.ini; })[0]);
+    var k=w?'v'+w.ini+'-'+w.fim:'d'+g.ini;
+    if(!map[k]){ map[k]={key:k,ini:w?w.ini:g.ini,label:w?periodo(w.meta,true):(g.meta.dataSessao||'s/ data'),grupos:[]}; out.push(map[k]); }
+    map[k].grupos.push(g); });
+  out.forEach(function(s){ s.grupos.sort(function(a,b){ return a.ini-b.ini||(b.virtual-a.virtual); }); s.pautas=[].concat.apply([],s.grupos.map(function(g){ return g.pautas; })); });
+  return out.sort(function(a,b){ return b.ini-a.ini; });
+}
+function pickModel(){
+  var cl=S.pickCl||classificar(), lim=S.pickLim||0, ocultas=0;
+  var ant=cl.anteriores.filter(function(g){ var antiga=!S.verAntigas&&g.ini<lim&&!g.pautas.some(function(x){ return x.id===S.cur; }); if(antiga) ocultas+=g.pautas.length; return !antiga; });
+  var flat=function(gs){ return [].concat.apply([],gs.map(function(g){ return g.pautas; })); };
+  return {and:flat(cl.andamento),fut:flat(cl.futuras),sem:semanasAnt(ant),ocultas:ocultas};
+}
+function renderPickPop(focusKey){
+  var pop=$('#pickpop'), m=pickModel(), st=S.pickSt||(S.pickSt={ant:false,w:{}}); pop.innerHTML='';
+  var opt=function(x,cls){ return h('button',{type:'button',role:'option',class:'pg-o'+(cls?' '+cls:''),'aria-selected':x.id===S.cur?'true':'false','data-id':x.id,text:pautaLabel(x)}); };
+  var none=function(){ return h('div',{class:'pg-none',text:'(nenhuma)'}); };
+  pop.append(h('div',{class:'pg-h',text:'Em andamento'})); if(m.and.length) m.and.forEach(function(x){ pop.append(opt(x)); }); else pop.append(none());
+  pop.append(h('div',{class:'pg-h',text:'Futuras'})); if(m.fut.length) m.fut.forEach(function(x){ pop.append(opt(x)); }); else pop.append(none());
+  var nAnt=m.sem.reduce(function(n,s){ return n+s.pautas.length; },0);
+  pop.append(h('button',{type:'button',class:'pg-t','data-k':'ant','aria-expanded':st.ant?'true':'false'},h('span',{class:'car',text:st.ant?'▾':'▸'}),'Anteriores ',h('span',{class:'n',text:'('+nAnt+(m.ocultas?' + '+m.ocultas+' mais antigas':'')+')'})));
+  if(st.ant){
+    if(!m.sem.length&&!m.ocultas) pop.append(none());
+    m.sem.forEach(function(s){ var ab=!!st.w[s.key];
+      pop.append(h('button',{type:'button',class:'pg-w','data-k':'w:'+s.key,'aria-expanded':ab?'true':'false'},h('span',{class:'car',text:ab?'▾':'▸'}),s.label+' ',h('span',{class:'n',text:'('+s.pautas.length+(s.pautas.length===1?' pauta)':' pautas)')})));
+      if(ab) s.pautas.forEach(function(x){ pop.append(opt(x,'pg-in')); }); });
+    if(m.ocultas) pop.append(h('button',{type:'button',class:'pg-more','data-k':'antigas',text:'Mostrar mais antigas… ('+m.ocultas+')'}));
+  }
+  var f=focusKey&&pop.querySelector('[data-k="'+focusKey+'"]'); if(f) f.focus();
+}
+function pickOpen(){
+  var m=pickModel(), st=S.pickSt={ant:false,w:{}};
+  m.sem.forEach(function(s){ if(s.pautas.some(function(x){ return x.id===S.cur; })){ st.ant=true; st.w[s.key]=true; } });
+  var pop=$('#pickpop'); pop.hidden=false; $('#pickb').setAttribute('aria-expanded','true'); renderPickPop();
+  var sel=pop.querySelector('[aria-selected="true"]')||pop.querySelector('button'); if(sel){ sel.focus(); if(sel.scrollIntoView) sel.scrollIntoView({block:'nearest'}); }
+}
+function pickClose(foco){ var pop=$('#pickpop'); if(pop.hidden) return; pop.hidden=true; $('#pickb').setAttribute('aria-expanded','false'); if(foco) $('#pickb').focus(); }
+$('#pickb').addEventListener('click',function(){ if($('#pickpop').hidden) pickOpen(); else pickClose(); });
+$('#pickb').addEventListener('keydown',function(e){ if((e.key==='ArrowDown'||e.key==='ArrowUp')&&$('#pickpop').hidden){ e.preventDefault(); pickOpen(); } });
+$('#pickpop').addEventListener('click',function(e){
+  var b=e.target.closest('button'); if(!b) return; var st=S.pickSt||(S.pickSt={ant:false,w:{}}), k=b.dataset.k;
+  if(b.dataset.id){ pickClose(true); if(b.dataset.id!==S.cur) openPauta(b.dataset.id); return; }
+  if(k==='ant'){ st.ant=!st.ant; renderPickPop(k); return; }
+  if(k==='antigas'){ S.verAntigas=true; renderTop(); renderPickPop('ant'); return; }
+  if(k&&k.slice(0,2)==='w:'){ var wk=k.slice(2); st.w[wk]=!st.w[wk]; renderPickPop(k); }
+});
+$('#pickpop').addEventListener('keydown',function(e){
+  var bs=Array.prototype.slice.call(this.querySelectorAll('button')), i=bs.indexOf(document.activeElement);
+  if(e.key==='Escape'){ e.preventDefault(); pickClose(true); return; }
+  if(e.key==='Tab'){ pickClose(); return; }
+  var j=e.key==='ArrowDown'?i+1:e.key==='ArrowUp'?i-1:e.key==='Home'?0:e.key==='End'?bs.length-1:null;
+  if(j!==null){ e.preventDefault(); j=Math.max(0,Math.min(bs.length-1,j)); bs[j].focus(); return; }
+  var b=document.activeElement, st=S.pickSt;
+  if(b&&b.dataset&&b.dataset.k&&st){ var k=b.dataset.k;
+    if(e.key==='ArrowRight'||e.key==='ArrowLeft'){ e.preventDefault(); var abre=e.key==='ArrowRight';
+      if(k==='ant'){ st.ant=abre; renderPickPop(k); } else if(k.slice(0,2)==='w:'){ st.w[k.slice(2)]=abre; renderPickPop(k); } } }
+});
+document.addEventListener('mousedown',function(e){ var w=$('#pickw'); if(w&&!w.contains(e.target)) pickClose(); });
 $('#pick').addEventListener('change',function(e){ if(e.target.value==='__antigas'){ S.verAntigas=true; renderTop(); toast('Períodos mais antigos incluídos no seletor, em Anteriores.'); return; } openPauta(e.target.value); });
 async function deletePauta(pid){
   try{
