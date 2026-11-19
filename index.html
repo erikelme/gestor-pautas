@@ -1264,14 +1264,14 @@ function classificar(){
   S.pautas.forEach(function(x){ if(!x.meta) return; var k=grupoKey(x); (grupos[k]=grupos[k]||{key:k,meta:x.meta,pautas:[]}).pautas.push(x); });
   var gl=Object.keys(grupos).map(function(k){ var g=grupos[k]; g.ini=keyOf(g.meta.dataSessao); g.fim=ehVirtual(g.meta)?keyOf(fimSessao(g.meta)):g.ini; g.virtual=ehVirtual(g.meta);
     g.pautas.sort(function(a,b){ var ga=gabById(a.gabinete), gb=gabById(b.gabinete); return (ga?+ga.num:99)-(gb?+gb.num:99); }); return g; });
-  var vAnd=gl.filter(function(g){ return g.virtual&&g.ini&&g.ini<=hoje&&hoje<g.fim; });
+  var vAnd=gl.filter(function(g){ return g.virtual&&g.ini&&g.ini<=hoje&&hoje<=g.fim; });
   var limite=vAnd.length?Math.max.apply(null,vAnd.map(function(g){return g.fim;})):keyOf(addDias(String(hoje).replace(/(\d{4})(\d{2})(\d{2})/,'$3/$2/$1'),7));
   var ords=gl.filter(function(g){ return !g.virtual&&g.ini>=hoje&&g.ini<=limite; }).sort(function(a,b){ return a.ini-b.ini; });
   var ordAnd=ords;
   var r={andamento:[],futuras:[],anteriores:[]};
   gl.forEach(function(g){
     if(vAnd.indexOf(g)>=0||ordAnd.indexOf(g)>=0) r.andamento.push(g);
-    else if((g.virtual?g.fim<=hoje:g.ini<hoje)) r.anteriores.push(g);
+    else if((g.virtual?g.fim<hoje:g.ini<hoje)) r.anteriores.push(g);
     else r.futuras.push(g);
   });
   r.andamento.sort(function(a,b){ return a.ini-b.ini||(b.virtual-a.virtual); });
@@ -1406,7 +1406,7 @@ function listenPautas(){
     S.pautas=snap.docs.map(function(d){ var x=d.data(); x.id=d.id; return x; }).sort(function(a,b){ return dateKey(b)-dateKey(a)||String(b.criadoEm).localeCompare(String(a.criadoEm)); });
     Save.ui('','Conectado');
     if(first){ first=false; var last=null; try{ last=localStorage.getItem('gp:last'); }catch(e){}
-      var cl=classificar(), andP=[]; cl.andamento.forEach(function(g){ andP=andP.concat(g.pautas); });
+      var cl=classificar(), andP=[], hk=hojeKey(); cl.andamento.filter(function(g){ return !(g.virtual&&g.fim===hk); }).concat(cl.andamento.filter(function(g){ return g.virtual&&g.fim===hk; })).forEach(function(g){ andP=andP.concat(g.pautas); });
       var pick=andP.find(function(p){return p.gabinete===S.me.gab;})||andP[0]||S.pautas.find(function(p){return p.id===last;})||S.pautas.find(function(p){return p.gabinete===S.me.gab;})||S.pautas[0];
       if(pick) openPauta(pick.id); else render(); }
     else if(S.cur&&!curPauta()){ toast('A pauta aberta foi excluída pelo gabinete relator.'); S.cur=null; stopPautaListeners(); if(S.pautas[0]) openPauta(S.pautas[0].id); else render(); }
@@ -1840,8 +1840,8 @@ document.querySelectorAll('[data-meta]').forEach(function(inp){
 });
 $('#m_gab').addEventListener('change',async function(e){ var pa=curPauta(); if(!pa||!(pa.gabAuto===true&&pa.criadoPor===S.me.uid)||!e.target.value) return; pa.gabinete=e.target.value; pa.gabAuto=false; savePauta(pa); await Save.flush(); toast('Gabinete relator definido.'); renderTop(); renderMain(); });
 /* seletor de pautas com grupos recolhíveis (Anteriores, por semana) */
-function semanasAnt(gl){
-  var vs=gl.filter(function(g){ return g.virtual; }), map={}, out=[];
+function semanasAnt(gl,todos){
+  var vs=(todos||gl).filter(function(g){ return g.virtual; }), map={}, out=[];
   gl.forEach(function(g){
     var w=g.virtual?g:(vs.filter(function(v){ return v.ini<g.ini&&g.ini<=v.fim; }).sort(function(a,b){ return b.ini-a.ini; })[0]||vs.filter(function(v){ return v.ini===g.ini; })[0]);
     var k=w?'v'+w.ini+'-'+w.fim:'d'+g.ini;
@@ -1854,7 +1854,7 @@ function pickModel(){
   var cl=S.pickCl||classificar(), lim=S.pickLim||0, ocultas=0;
   var ant=cl.anteriores.filter(function(g){ var antiga=!S.verAntigas&&g.ini<lim&&!g.pautas.some(function(x){ return x.id===S.cur; }); if(antiga) ocultas+=g.pautas.length; return !antiga; });
   var flat=function(gs){ return [].concat.apply([],gs.map(function(g){ return g.pautas; })); };
-  return {and:flat(cl.andamento),fut:flat(cl.futuras),sem:semanasAnt(ant),ocultas:ocultas};
+  return {and:flat(cl.andamento),fut:flat(cl.futuras),sem:semanasAnt(ant,cl.andamento.concat(cl.futuras,cl.anteriores)),ocultas:ocultas};
 }
 function renderPickPop(focusKey){
   var pop=$('#pickpop'), m=pickModel(), st=S.pickSt||(S.pickSt={ant:false,w:{}}); pop.innerHTML='';
